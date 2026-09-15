@@ -1,0 +1,23 @@
+services:
+  # Web Service gratuito no Render: roda API Fastify + WebSocket E o Bot do Discord juntos
+  - type: web
+    name: nkn-inhouse-service
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build --workspace=@nkn/shared && npm run build --workspace=@nkn/api && npm run build --workspace=@nkn/bot
+    startCommand: npm run start
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: RIOT_API_KEY
+        sync: false
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: CLIENT_ID
+        sync: false
+      - key: GUILD_ID
+        sync: false
+      - key: API_URL
+        value: http://localhost:10000
+      - key: WEB_DRAFT_URL
+        value: https://daniei-adler.github.io/nkn_inhouse

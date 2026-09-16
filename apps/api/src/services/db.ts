@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { Pool } from 'pg';
 import { PlayerProfile, MatchData } from '@nkn/shared';
 
 const DATA_DIR = path.resolve(__dirname, '../../../data');
@@ -11,14 +12,17 @@ export interface ServerSettings {
   waitingRoomVoiceId?: string;
 }
 
-export class JsonDb {
+export class DatabaseService {
   private players: Map<string, PlayerProfile> = new Map();
   private matches: Map<string, MatchData> = new Map();
   private settings: ServerSettings = {};
+  private pool: Pool | null = null;
+  private isSupabaseConnected = false;
 
   constructor() {
     this.ensureDirectoryExists();
-    this.load();
+    this.loadLocal();
+    this.initPostgres();
   }
 
   private ensureDirectoryExists() {
@@ -27,7 +31,7 @@ export class JsonDb {
     }
   }
 
-  private load() {
+  private loadLocal() {
     try {
       if (fs.existsSync(PLAYERS_FILE)) {
         const raw = fs.readFileSync(PLAYERS_FILE, 'utf-8');
@@ -35,7 +39,7 @@ export class JsonDb {
         list.forEach((p) => this.players.set(p.discordId, p));
       }
     } catch (e) {
-      console.error('Erro ao ler players.json:', e);
+      console.error('[DB Local] Erro ao ler players.json:', e);
     }
 
     try {
@@ -45,7 +49,7 @@ export class JsonDb {
         list.forEach((m) => this.matches.set(m.id, m));
       }
     } catch (e) {
-      console.error('Erro ao ler matches.json:', e);
+      console.error('[DB Local] Erro ao ler matches.json:', e);
     }
 
     try {
@@ -54,36 +58,111 @@ export class JsonDb {
         this.settings = JSON.parse(raw);
       }
     } catch (e) {
-      console.error('Erro ao ler settings.json:', e);
+      console.error('[DB Local] Erro ao ler settings.json:', e);
     }
   }
 
-  savePlayers() {
+  private async initPostgres() {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+      console.log('ℹ️ DATABASE_URL não definida. Operando em modo armazenamento local.');
+      return;
+    }
+
+    try {
+      this.pool = new Pool({
+        connectionString,
+        ssl: { rejectUnauthorized: false }, // Necessário para Supabase Transaction Pooler
+        max: 10,
+      });
+
+      // Testar conexão
+      const res = await this.pool.query('SELECT NOW()');
+      console.log('⚡ Conexão com Supabase PostgreSQL estabelecida com sucesso:', res.rows[0].now);
+      this.isSupabaseConnected = true;
+
+      // Carregar dados existentes do Supabase para a memória
+      await this.syncFromPostgres();
+    } catch (err: any) {
+      console.error('⚠️ Falha ao conectar ao Supabase PostgreSQL. Mantendo armazenamento local:', err.message);
+    }
+  }
+
+  private async syncFromPostgres() {
+    if (!this.pool) return;
+
+    try {
+      // 1. Carregar Jogadores
+      const pRes = await this.pool.query('SELECT data FROM players');
+      for (const row of pRes.rows) {
+        const p = row.data as PlayerProfile;
+        if (p && p.discordId) {
+          this.players.set(p.discordId, p);
+        }
+      }
+
+      // Se temos jogadores locais que ainda não estão no Postgres, subir
+      for (const p of this.players.values()) {
+        await this.pool.query(
+          `INSERT INTO players (discord_id, data, updated_at) 
+           VALUES ($1, $2, NOW()) 
+           ON CONFLICT (discord_id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
+          [p.discordId, JSON.stringify(p)]
+        );
+      }
+
+      // 2. Carregar Partidas
+      const mRes = await this.pool.query('SELECT data FROM matches');
+      for (const row of mRes.rows) {
+        const m = row.data as MatchData;
+        if (m && m.id) {
+          this.matches.set(m.id, m);
+        }
+      }
+
+      // 3. Carregar Configurações
+      const sRes = await this.pool.query("SELECT value FROM server_settings WHERE key = 'settings'");
+      if (sRes.rows.length > 0) {
+        this.settings = sRes.rows[0].value;
+      } else if (this.settings.waitingRoomVoiceId) {
+        await this.pool.query(
+          "INSERT INTO server_settings (key, value) VALUES ('settings', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+          [JSON.stringify(this.settings)]
+        );
+      }
+
+      console.log(`✅ Supabase sincronizado: ${this.players.size} jogadores, ${this.matches.size} partidas carregadas.`);
+    } catch (err: any) {
+      console.error('⚠️ Erro ao sincronizar dados com Supabase:', err.message);
+    }
+  }
+
+  private saveLocalPlayers() {
     try {
       this.ensureDirectoryExists();
       const list = Array.from(this.players.values());
       fs.writeFileSync(PLAYERS_FILE, JSON.stringify(list, null, 2), 'utf-8');
     } catch (e) {
-      console.error('Erro ao salvar players.json:', e);
+      console.error('Erro ao salvar players.json local:', e);
     }
   }
 
-  saveMatches() {
+  private saveLocalMatches() {
     try {
       this.ensureDirectoryExists();
       const list = Array.from(this.matches.values());
       fs.writeFileSync(MATCHES_FILE, JSON.stringify(list, null, 2), 'utf-8');
     } catch (e) {
-      console.error('Erro ao salvar matches.json:', e);
+      console.error('Erro ao salvar matches.json local:', e);
     }
   }
 
-  saveSettings() {
+  private saveLocalSettings() {
     try {
       this.ensureDirectoryExists();
       fs.writeFileSync(SETTINGS_FILE, JSON.stringify(this.settings, null, 2), 'utf-8');
     } catch (e) {
-      console.error('Erro ao salvar settings.json:', e);
+      console.error('Erro ao salvar settings.json local:', e);
     }
   }
 
@@ -94,7 +173,16 @@ export class JsonDb {
 
   setPlayer(discordId: string, profile: PlayerProfile) {
     this.players.set(discordId, profile);
-    this.savePlayers();
+    this.saveLocalPlayers();
+
+    if (this.pool && this.isSupabaseConnected) {
+      this.pool.query(
+        `INSERT INTO players (discord_id, data, updated_at) 
+         VALUES ($1, $2, NOW()) 
+         ON CONFLICT (discord_id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
+        [discordId, JSON.stringify(profile)]
+      ).catch((err) => console.error('[Supabase] Erro ao salvar jogador:', err.message));
+    }
   }
 
   getAllPlayers(): PlayerProfile[] {
@@ -108,7 +196,16 @@ export class JsonDb {
 
   setMatch(matchId: string, match: MatchData) {
     this.matches.set(matchId, match);
-    this.saveMatches();
+    this.saveLocalMatches();
+
+    if (this.pool && this.isSupabaseConnected) {
+      this.pool.query(
+        `INSERT INTO matches (id, status, data, updated_at) 
+         VALUES ($1, $2, $3, NOW()) 
+         ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, data = EXCLUDED.data, updated_at = NOW()`,
+        [matchId, match.status, JSON.stringify(match)]
+      ).catch((err) => console.error('[Supabase] Erro ao salvar partida:', err.message));
+    }
   }
 
   // Configurações do Servidor
@@ -118,8 +215,18 @@ export class JsonDb {
 
   setWaitingRoom(voiceChannelId: string) {
     this.settings.waitingRoomVoiceId = voiceChannelId;
-    this.saveSettings();
+    this.saveLocalSettings();
+
+    if (this.pool && this.isSupabaseConnected) {
+      this.pool.query(
+        `INSERT INTO server_settings (key, value, updated_at) 
+         VALUES ('settings', $1, NOW()) 
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+        [JSON.stringify(this.settings)]
+      ).catch((err) => console.error('[Supabase] Erro ao salvar settings:', err.message));
+    }
   }
 }
 
-export const db = new JsonDb();
+export const db = new DatabaseService();
+

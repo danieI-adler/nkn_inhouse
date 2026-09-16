@@ -162,7 +162,11 @@ export default function App() {
 
     if (!matchId) return;
 
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+    const apiUrl =
+      import.meta.env.VITE_API_URL ||
+      (window.location.hostname.includes('github.io')
+        ? 'https://nkn-inhouse-service.onrender.com'
+        : 'http://localhost:3001');
 
     import('socket.io-client').then(({ io }) => {
       const socket = io(apiUrl);

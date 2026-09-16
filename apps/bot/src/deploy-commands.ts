@@ -81,6 +81,16 @@ const commands = [
         .setDescription('Membro do Discord cujo perfil deseja visualizar (deixe vazio para ver o seu)')
         .setRequired(false)
     ),
+
+  new SlashCommandBuilder()
+    .setName('setup-fila')
+    .setDescription('Cria e fixa a mensagem permanente da Fila NKN Inhouse com atualização em tempo real')
+    .addChannelOption((option) =>
+      option
+        .setName('canal')
+        .setDescription('Canal de texto onde a mensagem permanente será fixada')
+        .setRequired(false)
+    ),
 ].map((cmd) => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(token);

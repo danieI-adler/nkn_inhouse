@@ -16,6 +16,8 @@ import {
 import { io as createSocketClient } from 'socket.io-client';
 import * as dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
+import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { GameMode, Lane } from '@nkn/shared';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -26,12 +28,27 @@ const API_BASE_URL = process.env.API_URL || 'http://localhost:3001';
 // Mapeamento de partida para o canal de texto do Discord
 const matchTextChannels = new Map<string, string>();
 
-// Filas ativas em memória
-const queueState = {
-  RANKED_AUTO: new Set<string>(),
-  RANKED_CAPTAIN: new Set<string>(),
-  CASUAL_ARAM_ZOACAO: new Set<string>(),
+// Estrutura de Fila por Rotas (Estilo LDDA / KaBuM High)
+export interface QueuedPlayer {
+  userId: string;
+  tag: string;
+  riotName?: string;
+  riotTag?: string;
+}
+
+const laneQueue: Record<'TOP' | 'JUNGLE' | 'MID' | 'ADC' | 'SUPPORT', QueuedPlayer[]> = {
+  TOP: [],
+  JUNGLE: [],
+  MID: [],
+  ADC: [],
+  SUPPORT: [],
 };
+
+// Mapeamento de duos: userId -> partnerId
+const duoPairs = new Map<string, string>();
+let permanentQueueChannelId: string | null = null;
+let permanentQueueMessageId: string | null = null;
+let activeMatchesCount = 0;
 
 export const client = new Client({
   intents: [
@@ -43,9 +60,23 @@ export const client = new Client({
   ],
   partials: [Partials.Channel, Partials.Message],
 });
-
 client.once('ready', () => {
   console.log(`🥷 Nukenin Inhouse Bot online como ${client.user?.tag}`);
+
+  // Recupera configurações de fila permanente salvas
+  (async () => {
+    try {
+      const sRes = await fetch(`${API_BASE_URL}/api/settings`);
+      const sData = await sRes.json();
+      if (sData.settings?.queueChannelId) {
+        permanentQueueChannelId = sData.settings.queueChannelId;
+        permanentQueueMessageId = sData.settings.queueMessageId || null;
+        console.log(`📌 Canal de fila permanente carregado: ${permanentQueueChannelId}, Msg: ${permanentQueueMessageId}`);
+      }
+    } catch (e) {
+      console.warn('Não foi possível carregar configurações de fila permanente na inicialização:', e);
+    }
+  })();
 
   // Conecta ao Socket.io da API para escutar término do draft
   try {
@@ -194,27 +225,52 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 
+  if (commandName === 'setup-fila') {
+    await interaction.deferReply({ ephemeral: true });
+
+    const targetChannel = (interaction.options.getChannel('canal') as any) || interaction.channel;
+    if (!targetChannel || !targetChannel.isTextBased() || !('send' in targetChannel)) {
+      await interaction.editReply('⚠️ Canal inválido para postar a fila.');
+      return;
+    }
+
+    try {
+      const payload = await buildQueueEmbedAndButtons();
+      const message = await targetChannel.send(payload);
+      permanentQueueChannelId = targetChannel.id;
+      permanentQueueMessageId = message.id;
+
+      // Salva no banco de dados Supabase para persistência contínua
+      await fetch(`${API_BASE_URL}/api/settings/queue-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId: targetChannel.id, messageId: message.id }),
+      });
+
+      await interaction.editReply(`✅ Painel oficial permanente da Fila NKN fixado com sucesso em <#${targetChannel.id}>!`);
+    } catch (e: any) {
+      await interaction.editReply(`❌ Erro ao configurar painel de fila: ${e.message}`);
+    }
+  }
+
   if (commandName === 'painel-fila') {
-    const embed = new EmbedBuilder()
-      .setTitle('🥷 NUKENIN INHOUSE QUEUE - LEAGUE OF LEGENDS')
-      .setDescription(
-        'Entre na fila para disputar partidas inhouse competitivas ou casuais no servidor Nukenin!\n\n' +
-        '**Modos Disponíveis:**\n' +
-        '⚔️ **Ranqueado (Auto Lane)**: Balanceamento automático por MMR e preferências de rota.\n' +
-        '👑 **Ranqueado (Capitães)**: Os 2 maiores MMRs escolhem os times via draft alternado.\n' +
-        '🎲 **Zoação (All-Random)**: Draft de capitães com campeões 100% aleatórios e sem alterar MMR.'
-      )
-      .setColor('#7c3aed')
-      .setFooter({ text: 'Sistema Oficial Nukenin Inhouse • Requer conta Riot vinculada' });
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      const payload = await buildQueueEmbedAndButtons();
+      const message = await (interaction.channel as any).send(payload);
+      permanentQueueChannelId = interaction.channelId;
+      permanentQueueMessageId = message.id;
 
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('queue_ranked_auto').setLabel('Fila Ranqueada (Auto)').setStyle(ButtonStyle.Primary).setEmoji('⚔️'),
-      new ButtonBuilder().setCustomId('queue_ranked_captain').setLabel('Fila Capitães').setStyle(ButtonStyle.Secondary).setEmoji('👑'),
-      new ButtonBuilder().setCustomId('queue_zoacao').setLabel('Modo Zoação').setStyle(ButtonStyle.Success).setEmoji('🎲'),
-      new ButtonBuilder().setCustomId('queue_leave').setLabel('Sair da Fila').setStyle(ButtonStyle.Danger)
-    );
+      await fetch(`${API_BASE_URL}/api/settings/queue-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId: interaction.channelId, messageId: message.id }),
+      });
 
-    await interaction.reply({ embeds: [embed], components: [row] });
+      await interaction.editReply('✅ Painel oficial da fila enviado e configurado!');
+    } catch (e: any) {
+      await interaction.editReply(`❌ Erro: ${e.message}`);
+    }
   }
 
   if (commandName === 'set-waiting-room') {
@@ -371,6 +427,8 @@ client.on('interactionCreate', async (interaction) => {
       );
 
       // Auto-move dos jogadores de volta para a waiting room e limpeza de canais
+      if (activeMatchesCount > 0) activeMatchesCount--;
+      await updatePermanentQueueMessage(interaction.guild!);
       await cleanupMatchChannelsAndReturnPlayers(interaction.guild!, matchId);
     } catch (err: any) {
       await interaction.editReply(`❌ Falha: ${err.message}`);
@@ -382,17 +440,78 @@ async function handleButtonQueue(interaction: ButtonInteraction) {
   const userId = interaction.user.id;
   const customId = interaction.customId;
 
-  if (customId === 'queue_leave') {
-    queueState.RANKED_AUTO.delete(userId);
-    queueState.RANKED_CAPTAIN.delete(userId);
-    queueState.CASUAL_ARAM_ZOACAO.delete(userId);
-    await interaction.reply({ content: '🚪 Você saiu de todas as filas.', ephemeral: true });
+  // 1. Botão Sair da Fila
+  if (customId === 'queue_lane_leave') {
+    let removed = false;
+    (['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'] as const).forEach((l) => {
+      const idx = laneQueue[l].findIndex((p) => p.userId === userId);
+      if (idx !== -1) {
+        laneQueue[l].splice(idx, 1);
+        removed = true;
+      }
+    });
+
+    // Se estava em duo, desfaz o duo
+    const partnerId = duoPairs.get(userId);
+    if (partnerId) {
+      duoPairs.delete(userId);
+      duoPairs.delete(partnerId);
+    }
+
+    await interaction.reply({
+      content: removed ? '🚪 Você saiu da fila.' : '⚠️ Você não está na fila.',
+      ephemeral: true,
+    });
+    await updatePermanentQueueMessage(interaction.guild!);
     return;
   }
 
-  let mode: GameMode = 'RANKED_AUTO';
-  if (customId === 'queue_ranked_captain') mode = 'RANKED_CAPTAIN';
-  if (customId === 'queue_zoacao') mode = 'CASUAL_ARAM_ZOACAO';
+  // 2. Botão Lista de Jogadores na Fila
+  if (customId === 'queue_lane_players') {
+    const total = (['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'] as const).reduce(
+      (acc, l) => acc + laneQueue[l].length,
+      0
+    );
+
+    if (total === 0) {
+      await interaction.reply({ content: '📊 A fila está vazia no momento.', ephemeral: true });
+      return;
+    }
+
+    const lines: string[] = [];
+    (['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'] as const).forEach((l) => {
+      if (laneQueue[l].length > 0) {
+        lines.push(`**${l}**: ${laneQueue[l].map((p) => `<@${p.userId}> (${p.riotName ? `${p.riotName}#${p.riotTag}` : p.tag})`).join(', ')}`);
+      }
+    });
+
+    await interaction.reply({
+      content: `👥 **Jogadores na Fila (${total}):**\n${lines.join('\n')}`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // 3. Botão Duo (Informativo / Em desenvolvimento amigável)
+  if (customId === 'queue_lane_duo') {
+    await interaction.reply({
+      content: '🤝 **Sistema de Duo**: Em breve! Para jogar juntos agora, entrem nas rotas desejadas no painel da fila.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // 4. Seleção de Rotas (Top, Jungle, Mid, Adc, Sup)
+  const laneMap: Record<string, 'TOP' | 'JUNGLE' | 'MID' | 'ADC' | 'SUPPORT'> = {
+    queue_lane_top: 'TOP',
+    queue_lane_jungle: 'JUNGLE',
+    queue_lane_mid: 'MID',
+    queue_lane_adc: 'ADC',
+    queue_lane_sup: 'SUPPORT',
+  };
+
+  const selectedLane = laneMap[customId];
+  if (!selectedLane) return;
 
   // Verifica se o jogador tem conta vinculada
   try {
@@ -405,22 +524,50 @@ async function handleButtonQueue(interaction: ButtonInteraction) {
       return;
     }
 
-    const queue = queueState[mode];
-    if (queue.has(userId)) {
-      await interaction.reply({ content: '⚠️ Você já está nessa fila!', ephemeral: true });
-      return;
-    }
+    const profileData = await profileRes.json();
+    const profile = profileData.profile;
 
-    queue.add(userId);
+    // Remove o jogador de qualquer rota que ele já estivesse
+    (['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'] as const).forEach((l) => {
+      const idx = laneQueue[l].findIndex((p) => p.userId === userId);
+      if (idx !== -1) laneQueue[l].splice(idx, 1);
+    });
+
+    // Adiciona na rota selecionada
+    laneQueue[selectedLane].push({
+      userId,
+      tag: interaction.user.tag,
+      riotName: profile?.riotGameName,
+      riotTag: profile?.riotTagLine,
+    });
+
     await interaction.reply({
-      content: `🎯 Você entrou na fila **${mode}**! (${queue.size}/10 jogadores)`,
+      content: `🎯 Você entrou na fila de **${selectedLane}**!`,
       ephemeral: true,
     });
 
-    if (queue.size >= 10) {
-      const playerIds: string[] = Array.from(queue).slice(0, 10);
-      playerIds.forEach((id) => queue.delete(id));
-      await createMatchRoom(interaction.guild!, playerIds, mode);
+    // Atualiza a mensagem permanente
+    await updatePermanentQueueMessage(interaction.guild!);
+
+    // Checa se atingiu 10 jogadores (2 de cada rota) para formar a partida
+    const isReady = (['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'] as const).every(
+      (l) => laneQueue[l].length >= 2
+    );
+
+    if (isReady) {
+      const matchPlayers: string[] = [];
+      (['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'] as const).forEach((l) => {
+        const p1 = laneQueue[l].shift();
+        const p2 = laneQueue[l].shift();
+        if (p1) matchPlayers.push(p1.userId);
+        if (p2) matchPlayers.push(p2.userId);
+      });
+
+      // Atualiza a mensagem permanente pós-pop
+      await updatePermanentQueueMessage(interaction.guild!);
+
+      // Dispara a criação da sala
+      await createMatchRoom(interaction.guild!, matchPlayers, 'RANKED_AUTO');
     }
   } catch (err: any) {
     await interaction.reply({ content: `❌ Erro: ${err.message}`, ephemeral: true });
@@ -440,6 +587,9 @@ async function createMatchRoom(guild: Guild, playerIds: string[], mode: GameMode
       console.error('Erro ao criar partida:', data);
       return;
     }
+
+    activeMatchesCount++;
+    await updatePermanentQueueMessage(guild);
 
     const match = data.match;
     const matchId = match.id;
@@ -598,6 +748,82 @@ async function cleanupMatchChannelsAndReturnPlayers(guild: Guild, matchId: strin
     }, 120000); // 2 minutos
   } catch (err) {
     console.error('Erro no cleanupMatchChannelsAndReturnPlayers:', err);
+  }
+}
+
+// Função para construir o Embed e os Botões estilo LDDA / KaBuM High com o Banner NKN
+async function buildQueueEmbedAndButtons() {
+  const topCount = laneQueue.TOP.length;
+  const jgCount = laneQueue.JUNGLE.length;
+  const midCount = laneQueue.MID.length;
+  const adcCount = laneQueue.ADC.length;
+  const supCount = laneQueue.SUPPORT.length;
+  const totalInQueue = topCount + jgCount + midCount + adcCount + supCount;
+
+  const topList = topCount > 0 ? laneQueue.TOP.map((p) => `<@${p.userId}>`).join(', ') : '*(vazio)*';
+  const jgList = jgCount > 0 ? laneQueue.JUNGLE.map((p) => `<@${p.userId}>`).join(', ') : '*(vazio)*';
+  const midList = midCount > 0 ? laneQueue.MID.map((p) => `<@${p.userId}>`).join(', ') : '*(vazio)*';
+  const adcList = adcCount > 0 ? laneQueue.ADC.map((p) => `<@${p.userId}>`).join(', ') : '*(vazio)*';
+  const supList = supCount > 0 ? laneQueue.SUPPORT.map((p) => `<@${p.userId}>`).join(', ') : '*(vazio)*';
+
+  const embed = new EmbedBuilder()
+    .setTitle(`🥷 Fila NKN Inhouse (${totalInQueue}/10 Jogadores)`)
+    .setDescription(
+      `🛡️ **(${topCount}/2)** Top: ${topList}\n` +
+      `🌲 **(${jgCount}/2)** Jungle: ${jgList}\n` +
+      `⚔️ **(${midCount}/2)** Mid: ${midList}\n` +
+      `🏹 **(${adcCount}/2)** Adc: ${adcList}\n` +
+      `💖 **(${supCount}/2)** Sup: ${supList}\n\n` +
+      `• 🕹️ \`${activeMatchesCount * 10} jogadores\` em partida no momento\n\n` +
+      `🏹 **Duos (0)**\nNenhum duo`
+    )
+    .setColor('#7c3aed')
+    .setImage('attachment://queue_banner.png')
+    .setFooter({ text: 'Fila Competitiva NKN • Requer conta Riot vinculada (/vincular)' });
+
+  // Linha 1: Rotas Principais
+  const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('queue_lane_top').setLabel(`Top (${topCount}/2)`).setStyle(ButtonStyle.Success).setEmoji('🛡️'),
+    new ButtonBuilder().setCustomId('queue_lane_jungle').setLabel(`Jungle (${jgCount}/2)`).setStyle(ButtonStyle.Success).setEmoji('🌲'),
+    new ButtonBuilder().setCustomId('queue_lane_mid').setLabel(`Mid (${midCount}/2)`).setStyle(ButtonStyle.Primary).setEmoji('⚔️'),
+    new ButtonBuilder().setCustomId('queue_lane_adc').setLabel(`Adc (${adcCount}/2)`).setStyle(ButtonStyle.Primary).setEmoji('🏹'),
+    new ButtonBuilder().setCustomId('queue_lane_sup').setLabel(`Sup (${supCount}/2)`).setStyle(ButtonStyle.Primary).setEmoji('💖')
+  );
+
+  // Linha 2: Ações (Sair, Duo, Jogadores)
+  const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('queue_lane_leave').setLabel('Sair').setStyle(ButtonStyle.Danger).setEmoji('🚪'),
+    new ButtonBuilder().setCustomId('queue_lane_duo').setLabel('Duo').setStyle(ButtonStyle.Primary).setEmoji('🤝'),
+    new ButtonBuilder().setCustomId('queue_lane_players').setLabel('Jogadores').setStyle(ButtonStyle.Secondary).setEmoji('🔎')
+  );
+
+  const bannerPath = path.resolve(__dirname, '../assets/queue_banner.png');
+  const files: AttachmentBuilder[] = [];
+  if (fs.existsSync(bannerPath)) {
+    files.push(new AttachmentBuilder(bannerPath, { name: 'queue_banner.png' }));
+  }
+
+  return { embeds: [embed], components: [row1, row2], files };
+}
+
+// Atualiza a mensagem permanente existente ou recupera ela
+async function updatePermanentQueueMessage(guild: Guild) {
+  if (!permanentQueueChannelId || !permanentQueueMessageId) return;
+
+  try {
+    const channel = await guild.channels.fetch(permanentQueueChannelId).catch(() => null);
+    if (!channel || !channel.isTextBased() || !('messages' in channel)) return;
+
+    const message = await (channel as any).messages.fetch(permanentQueueMessageId).catch(() => null);
+    if (!message) return;
+
+    const payload = await buildQueueEmbedAndButtons();
+    await message.edit({
+      embeds: payload.embeds,
+      components: payload.components,
+    });
+  } catch (err) {
+    console.error('Erro ao atualizar mensagem permanente da fila:', err);
   }
 }
 

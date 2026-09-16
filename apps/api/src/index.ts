@@ -134,6 +134,11 @@ async function start() {
     return reply.send({ success: true, settings: db.getSettings() });
   });
 
+  server.post<{ Body: { channelId: string; messageId: string } }>('/api/settings/queue-message', async (request, reply) => {
+    db.setQueueMessage(request.body.channelId, request.body.messageId);
+    return reply.send({ success: true, settings: db.getSettings() });
+  });
+
   // 4. Criação de Partida a partir de 10 jogadores
   server.post<{
     Body: { playerIds: string[]; mode: GameMode };

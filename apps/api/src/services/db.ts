@@ -24,7 +24,10 @@ export class DatabaseService {
   constructor() {
     this.ensureDirectoryExists();
     this.loadLocal();
-    this.initPostgres();
+  }
+
+  public async init(): Promise<void> {
+    await this.initPostgres();
   }
 
   private ensureDirectoryExists() {
@@ -171,6 +174,28 @@ export class DatabaseService {
   // Métodos de Jogador
   getPlayer(discordId: string): PlayerProfile | undefined {
     return this.players.get(discordId);
+  }
+
+  async getPlayerAsync(discordId: string): Promise<PlayerProfile | undefined> {
+    const cached = this.players.get(discordId);
+    if (cached) return cached;
+
+    if (this.pool && this.isSupabaseConnected) {
+      try {
+        const res = await this.pool.query('SELECT data FROM players WHERE discord_id = $1', [discordId]);
+        if (res.rows.length > 0) {
+          const p = res.rows[0].data as PlayerProfile;
+          if (p) {
+            this.players.set(discordId, p);
+            return p;
+          }
+        }
+      } catch (err: any) {
+        console.error('[Supabase] Erro no getPlayerAsync:', err.message);
+      }
+    }
+
+    return undefined;
   }
 
   setPlayer(discordId: string, profile: PlayerProfile) {

@@ -20,6 +20,9 @@ const riotService = new RiotService(process.env.RIOT_API_KEY);
 const server = Fastify({ logger: true });
 
 async function start() {
+  // Aguarda a conexão e sincronização com o Supabase antes de aceitar requisições
+  await db.init();
+
   await server.register(cors, {
     origin: '*',
   });
@@ -45,7 +48,7 @@ async function start() {
       const rankInfo = await riotService.getSoloQRankByPuuid(riotAcc.puuid);
       const topChamps = await riotService.getTopChampionMasteries(riotAcc.puuid);
 
-      let profile = db.getPlayer(discordId);
+      let profile = await db.getPlayerAsync(discordId);
       if (!profile) {
         profile = {
           id: discordId,
@@ -86,7 +89,7 @@ async function start() {
     Body: { discordId: string; lanes: any[] };
   }>('/api/players/lanes', async (request, reply) => {
     const { discordId, lanes } = request.body;
-    const profile = db.getPlayer(discordId);
+    const profile = await db.getPlayerAsync(discordId);
     if (!profile) {
       return reply.status(404).send({ success: false, message: 'Perfil não encontrado.' });
     }
@@ -98,7 +101,7 @@ async function start() {
 
   // 3. Rota de Perfil
   server.get<{ Params: { discordId: string } }>('/api/players/:discordId', async (request, reply) => {
-    const profile = db.getPlayer(request.params.discordId);
+    const profile = await db.getPlayerAsync(request.params.discordId);
     if (!profile) {
       return reply.status(404).send({ success: false, message: 'Perfil não encontrado.' });
     }
@@ -149,7 +152,9 @@ async function start() {
       return reply.status(400).send({ message: 'Necessário 10 jogadores.' });
     }
 
-    const participants = playerIds.map((id) => db.getPlayer(id)).filter(Boolean) as PlayerProfile[];
+    const participants = (
+      await Promise.all(playerIds.map((id) => db.getPlayerAsync(id)))
+    ).filter(Boolean) as PlayerProfile[];
     if (participants.length !== 10) {
       return reply.status(400).send({ message: 'Um ou mais jogadores não estão cadastrados.' });
     }

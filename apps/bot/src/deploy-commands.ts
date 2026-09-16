@@ -58,6 +58,19 @@ const commands = [
           { name: 'Time Vermelho', value: 'RED' }
         )
     ),
+  new SlashCommandBuilder()
+    .setName('ranking')
+    .setDescription('Exibe a Leaderboard com o Top jogadores e MMR da comunidade Nukenin'),
+
+  new SlashCommandBuilder()
+    .setName('set-waiting-room')
+    .setDescription('Define o canal de voz geral para onde os jogadores voltam após o término da partida')
+    .addChannelOption((option) =>
+      option
+        .setName('canal_voz')
+        .setDescription('Canal de voz geral / sala de espera')
+        .setRequired(true)
+    ),
 ].map((cmd) => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(token);

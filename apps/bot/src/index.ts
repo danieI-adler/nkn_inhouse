@@ -161,6 +161,60 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.reply({ embeds: [embed], components: [row] });
   }
 
+  if (commandName === 'set-waiting-room') {
+    const channel = interaction.options.getChannel('canal_voz', true);
+    if (channel.type !== ChannelType.GuildVoice) {
+      await interaction.reply({ content: '⚠️ Por favor, selecione um canal de voz válido.', ephemeral: true });
+      return;
+    }
+
+    try {
+      await fetch(`${API_BASE_URL}/api/settings/waiting-room`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ waitingRoomVoiceId: channel.id }),
+      });
+
+      await interaction.reply({ content: `✅ Sala de espera definida para: **${channel.name}**!`, ephemeral: true });
+    } catch (e: any) {
+      await interaction.reply({ content: `❌ Erro ao salvar: ${e.message}`, ephemeral: true });
+    }
+  }
+
+  if (commandName === 'ranking') {
+    await interaction.deferReply();
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/leaderboard`);
+      const data = await res.json();
+
+      if (!res.ok || !data.leaderboard || data.leaderboard.length === 0) {
+        await interaction.editReply('📊 Nenhum jogador registrado no ranking até o momento.');
+        return;
+      }
+
+      const medals = ['🥇', '🥈', '🥉'];
+      const rows = data.leaderboard.map((p: any, idx: number) => {
+        const medal = idx < 3 ? medals[idx] : `\`#${idx + 1}\``;
+        const totalGames = p.matchesPlayed || 0;
+        const winrate = totalGames > 0 ? Math.round((p.wins / totalGames) * 100) : 0;
+        return `${medal} **${p.riotGameName}#${p.riotTagLine}** (<@${p.discordId}>)\n` +
+               `⚡ MMR: **${p.internalMmr}** | V: **${p.wins}** D: **${p.losses}** (${winrate}% WR) | Rotas: \`${p.registeredLanes.join(', ')}\``;
+      });
+
+      const embed = new EmbedBuilder()
+        .setTitle('🏆 LEADERBOARD - COMUNIDADE NUKENIN')
+        .setDescription(rows.join('\n\n'))
+        .setColor('#eab308')
+        .setFooter({ text: 'Ranking oficial baseado em MMR interno Nukenin' })
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [embed] });
+    } catch (err: any) {
+      await interaction.editReply(`❌ Erro ao consultar ranking: ${err.message}`);
+    }
+  }
+
   if (commandName === 'resultado') {
     const matchId = interaction.options.getString('partida_id', true);
     const winner = interaction.options.getString('vencedor', true).toUpperCase() as 'BLUE' | 'RED';
@@ -183,8 +237,11 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.editReply(
         `🏆 **Partida #${matchId} Concluída!**\nVencedor: **Time ${winner === 'BLUE' ? 'Azul' : 'Vermelho'}**.\n` +
         `O MMR dos participantes foi recalculado no banco de dados.\n` +
-        `⏳ Esta sala e os canais de voz serão removidos em 10 minutos.`
+        `🔄 Movendo jogadores de volta para a sala de espera e agendando limpeza dos canais...`
       );
+
+      // Auto-move dos jogadores de volta para a waiting room e limpeza de canais
+      await cleanupMatchChannelsAndReturnPlayers(interaction.guild!, matchId);
     } catch (err: any) {
       await interaction.editReply(`❌ Falha: ${err.message}`);
     }
@@ -353,6 +410,62 @@ async function syncLaneRoles(guild: Guild, memberId: string, lanes: Lane[]) {
     } else {
       if (member.roles.cache.has(role.id)) await member.roles.remove(role);
     }
+  }
+}
+
+async function cleanupMatchChannelsAndReturnPlayers(guild: Guild, matchId: string) {
+  try {
+    // 1. Obtém a waiting room configurada
+    let waitingRoomId: string | undefined;
+    try {
+      const settingsRes = await fetch(`${API_BASE_URL}/api/settings`);
+      const settingsData = await settingsRes.json();
+      waitingRoomId = settingsData.settings?.waitingRoomVoiceId;
+    } catch (e) {
+      console.error('Erro ao consultar settings da waiting room:', e);
+    }
+
+    const cleanMatchId = matchId.toLowerCase();
+
+    // 2. Encontra os canais de voz temporários da partida
+    const matchVoiceChannels = guild.channels.cache.filter(
+      (c) =>
+        c.type === ChannelType.GuildVoice &&
+        (c.name.toLowerCase().includes(cleanMatchId) || c.name.toLowerCase().includes(matchId.toLowerCase()))
+    );
+
+    // 3. Move os membros de volta para a waiting room se configurada
+    if (waitingRoomId) {
+      const waitingRoom = guild.channels.cache.get(waitingRoomId);
+      if (waitingRoom && waitingRoom.type === ChannelType.GuildVoice) {
+        for (const [_, voiceChan] of matchVoiceChannels) {
+          if (voiceChan.isVoiceBased()) {
+            for (const [_, member] of voiceChan.members) {
+              await member.voice.setChannel(waitingRoomId).catch(() => null);
+            }
+          }
+        }
+      }
+    }
+
+    // 4. Agenda a exclusão das salas temporárias (texto, voz e categoria) em 2 minutos para dar tempo de ver o placar
+    setTimeout(async () => {
+      try {
+        const channelsToDelete = guild.channels.cache.filter(
+          (c) =>
+            c.name.toLowerCase().includes(cleanMatchId) ||
+            c.name.toLowerCase().includes(matchId.toLowerCase())
+        );
+
+        for (const [_, channel] of channelsToDelete) {
+          await channel.delete().catch(() => null);
+        }
+      } catch (err) {
+        console.error('Erro ao deletar canais da partida:', err);
+      }
+    }, 120000); // 2 minutos
+  } catch (err) {
+    console.error('Erro no cleanupMatchChannelsAndReturnPlayers:', err);
   }
 }
 

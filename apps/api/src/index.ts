@@ -13,10 +13,7 @@ import { balanceTeams } from './services/matchmaker';
 import { DraftEngine } from './services/draftEngine';
 import { generateMatchCard } from './services/cardRenderer';
 import { calculateNewMmr } from './services/mmr';
-
-// Banco de dados em memória simples para partidas e perfis (persistível em Postgres/Prisma)
-const playersDb = new Map<string, PlayerProfile>();
-const matchesDb = new Map<string, MatchData>();
+import { db } from './services/db';
 
 const riotService = new RiotService(process.env.RIOT_API_KEY);
 
@@ -47,7 +44,7 @@ async function start() {
       const riotAcc = await riotService.getAccountByRiotId(gameName, tagLine);
       const rankInfo = await riotService.getSoloQRankByPuuid(riotAcc.puuid);
 
-      let profile = playersDb.get(discordId);
+      let profile = db.getPlayer(discordId);
       if (!profile) {
         profile = {
           id: discordId,
@@ -74,7 +71,7 @@ async function start() {
         profile.riotLp = rankInfo.lp;
       }
 
-      playersDb.set(discordId, profile);
+      db.setPlayer(discordId, profile);
       return reply.send({ success: true, profile });
     } catch (err: any) {
       return reply.status(400).send({ success: false, message: err.message });
@@ -86,23 +83,41 @@ async function start() {
     Body: { discordId: string; lanes: any[] };
   }>('/api/players/lanes', async (request, reply) => {
     const { discordId, lanes } = request.body;
-    const profile = playersDb.get(discordId);
+    const profile = db.getPlayer(discordId);
     if (!profile) {
       return reply.status(404).send({ success: false, message: 'Perfil não encontrado.' });
     }
 
     profile.registeredLanes = lanes;
-    playersDb.set(discordId, profile);
+    db.setPlayer(discordId, profile);
     return reply.send({ success: true, profile });
   });
 
   // 3. Rota de Perfil
   server.get<{ Params: { discordId: string } }>('/api/players/:discordId', async (request, reply) => {
-    const profile = playersDb.get(request.params.discordId);
+    const profile = db.getPlayer(request.params.discordId);
     if (!profile) {
       return reply.status(404).send({ success: false, message: 'Perfil não encontrado.' });
     }
     return reply.send({ success: true, profile });
+  });
+
+  // 3.1. Rota de Leaderboard / Ranking Geral
+  server.get('/api/leaderboard', async (_request, reply) => {
+    const all = db.getAllPlayers();
+    // Ordena por MMR decrescente
+    all.sort((a, b) => b.internalMmr - a.internalMmr);
+    return reply.send({ success: true, leaderboard: all.slice(0, 20) });
+  });
+
+  // 3.2. Rotas de Configuração (Waiting Room)
+  server.get('/api/settings', async (_request, reply) => {
+    return reply.send({ success: true, settings: db.getSettings() });
+  });
+
+  server.post<{ Body: { waitingRoomVoiceId: string } }>('/api/settings/waiting-room', async (request, reply) => {
+    db.setWaitingRoom(request.body.waitingRoomVoiceId);
+    return reply.send({ success: true, settings: db.getSettings() });
   });
 
   // 4. Criação de Partida a partir de 10 jogadores
@@ -115,7 +130,7 @@ async function start() {
       return reply.status(400).send({ message: 'Necessário 10 jogadores.' });
     }
 
-    const participants = playerIds.map((id) => playersDb.get(id)).filter(Boolean) as PlayerProfile[];
+    const participants = playerIds.map((id) => db.getPlayer(id)).filter(Boolean) as PlayerProfile[];
     if (participants.length !== 10) {
       return reply.status(400).send({ message: 'Um ou mais jogadores não estão cadastrados.' });
     }
@@ -141,7 +156,7 @@ async function start() {
       spectatorToken: specToken,
     };
 
-    matchesDb.set(matchId, match);
+    db.setMatch(matchId, match);
 
     const blueSlots = match.blueTeam.map((s) => ({
       discordTag: s.player.discordTag,
@@ -166,6 +181,7 @@ async function start() {
       async (finalDraftState) => {
         // Callback de Draft Concluído
         match.status = 'IN_PROGRESS';
+        db.setMatch(matchId, match);
       }
     );
 
@@ -180,7 +196,7 @@ async function start() {
 
   // 5. Rota para Gerar Imagem do Card de Partida
   server.get<{ Params: { matchId: string } }>('/api/matches/:matchId/card', async (request, reply) => {
-    const match = matchesDb.get(request.params.matchId);
+    const match = db.getMatch(request.params.matchId);
     if (!match) {
       return reply.status(404).send('Partida não encontrada.');
     }
@@ -214,13 +230,14 @@ async function start() {
     Body: { matchId: string; winner: 'BLUE' | 'RED' };
   }>('/api/matches/report', async (request, reply) => {
     const { matchId, winner } = request.body;
-    const match = matchesDb.get(matchId);
+    const match = db.getMatch(matchId);
     if (!match || match.status === 'FINISHED') {
       return reply.status(400).send({ message: 'Partida inválida ou já finalizada.' });
     }
 
     match.status = 'FINISHED';
     match.winner = winner;
+    db.setMatch(matchId, match);
 
     const blueAvg = match.blueTeam.reduce((acc, s) => acc + s.player.internalMmr, 0) / 5;
     const redAvg = match.redTeam.reduce((acc, s) => acc + s.player.internalMmr, 0) / 5;
@@ -230,27 +247,27 @@ async function start() {
     // Atualiza MMR se não for modo zoação
     if (match.mode !== 'CASUAL_ARAM_ZOACAO') {
       for (const slot of match.blueTeam) {
-        const p = playersDb.get(slot.player.discordId);
+        const p = db.getPlayer(slot.player.discordId);
         if (p) {
           const isWinner = winner === 'BLUE';
           const { newMmr, delta } = calculateNewMmr(p.internalMmr, p.matchesPlayed, isWinner, blueAvg, redAvg);
           p.internalMmr = newMmr;
           p.matchesPlayed++;
           if (isWinner) p.wins++; else p.losses++;
-          playersDb.set(p.discordId, p);
+          db.setPlayer(p.discordId, p);
           resultsSummary.push({ discordId: p.discordId, newMmr, delta, won: isWinner });
         }
       }
 
       for (const slot of match.redTeam) {
-        const p = playersDb.get(slot.player.discordId);
+        const p = db.getPlayer(slot.player.discordId);
         if (p) {
           const isWinner = winner === 'RED';
           const { newMmr, delta } = calculateNewMmr(p.internalMmr, p.matchesPlayed, isWinner, redAvg, blueAvg);
           p.internalMmr = newMmr;
           p.matchesPlayed++;
           if (isWinner) p.wins++; else p.losses++;
-          playersDb.set(p.discordId, p);
+          db.setPlayer(p.discordId, p);
           resultsSummary.push({ discordId: p.discordId, newMmr, delta, won: isWinner });
         }
       }

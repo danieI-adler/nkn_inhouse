@@ -104,10 +104,10 @@ export class DatabaseService {
       // Se temos jogadores locais que ainda não estão no Postgres, subir
       for (const p of this.players.values()) {
         await this.pool.query(
-          `INSERT INTO players (discord_id, data, updated_at) 
-           VALUES ($1, $2, NOW()) 
+          `INSERT INTO players (id, discord_id, data, updated_at) 
+           VALUES ($1, $2, $3, NOW()) 
            ON CONFLICT (discord_id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
-          [p.discordId, JSON.stringify(p)]
+          [p.discordId, p.discordId, JSON.stringify(p)]
         );
       }
 
@@ -177,11 +177,13 @@ export class DatabaseService {
 
     if (this.pool && this.isSupabaseConnected) {
       this.pool.query(
-        `INSERT INTO players (discord_id, data, updated_at) 
-         VALUES ($1, $2, NOW()) 
+        `INSERT INTO players (id, discord_id, data, updated_at) 
+         VALUES ($1, $2, $3, NOW()) 
          ON CONFLICT (discord_id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
-        [discordId, JSON.stringify(profile)]
-      ).catch((err) => console.error('[Supabase] Erro ao salvar jogador:', err.message));
+        [discordId, discordId, JSON.stringify(profile)]
+      )
+      .then(() => console.log(`[Supabase] Jogador ${profile.riotGameName || discordId} salvo com sucesso na nuvem!`))
+      .catch((err) => console.error('[Supabase] Erro ao salvar jogador:', err.message));
     }
   }
 

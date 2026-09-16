@@ -142,6 +142,11 @@ async function start() {
     return reply.send({ success: true, settings: db.getSettings() });
   });
 
+  server.post<{ Body: { mode: GameMode } }>('/api/settings/queue-mode', async (request, reply) => {
+    db.setQueueMode(request.body.mode);
+    return reply.send({ success: true, settings: db.getSettings() });
+  });
+
   // 4. Criação de Partida a partir de 10 jogadores
   server.post<{
     Body: { playerIds: string[]; mode: GameMode };

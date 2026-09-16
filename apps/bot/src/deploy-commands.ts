@@ -90,6 +90,32 @@ const commands = [
         .setName('canal')
         .setDescription('Canal de texto onde a mensagem permanente será fixada')
         .setRequired(false)
+    )
+    .addStringOption((option) =>
+      option
+        .setName('modo')
+        .setDescription('Tipo/Modo de jogo da fila permanente')
+        .setRequired(false)
+        .addChoices(
+          { name: 'Ranked Competitiva (Auto MMR)', value: 'RANKED_AUTO' },
+          { name: 'Capitães (Draft com Capitães)', value: 'RANKED_CAPTAIN' },
+          { name: 'ARAM / Zoação (Casual)', value: 'CASUAL_ARAM_ZOACAO' }
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName('set-modo')
+    .setDescription('Altera o modo de jogo da fila ativa no painel permanente')
+    .addStringOption((option) =>
+      option
+        .setName('modo')
+        .setDescription('Tipo/Modo de jogo desejado para a fila')
+        .setRequired(true)
+        .addChoices(
+          { name: 'Ranked Competitiva (Auto MMR)', value: 'RANKED_AUTO' },
+          { name: 'Capitães (Draft com Capitães)', value: 'RANKED_CAPTAIN' },
+          { name: 'ARAM / Zoação (Casual)', value: 'CASUAL_ARAM_ZOACAO' }
+        )
     ),
 ].map((cmd) => cmd.toJSON());
 

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { Pool } from 'pg';
-import { PlayerProfile, MatchData } from '@nkn/shared';
+import { PlayerProfile, MatchData, GameMode } from '@nkn/shared';
 
 const DATA_DIR = path.resolve(__dirname, '../../../data');
 const PLAYERS_FILE = path.join(DATA_DIR, 'players.json');
@@ -12,6 +12,7 @@ export interface ServerSettings {
   waitingRoomVoiceId?: string;
   queueChannelId?: string;
   queueMessageId?: string;
+  queueMode?: GameMode;
 }
 
 export class DatabaseService {
@@ -268,6 +269,20 @@ export class DatabaseService {
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
         [JSON.stringify(this.settings)]
       ).catch((err) => console.error('[Supabase] Erro ao salvar settings da fila:', err.message));
+    }
+  }
+
+  setQueueMode(mode: GameMode) {
+    this.settings.queueMode = mode;
+    this.saveLocalSettings();
+
+    if (this.pool && this.isSupabaseConnected) {
+      this.pool.query(
+        `INSERT INTO server_settings (key, value, updated_at) 
+         VALUES ('settings', $1, NOW()) 
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+        [JSON.stringify(this.settings)]
+      ).catch((err) => console.error('[Supabase] Erro ao salvar queueMode:', err.message));
     }
   }
 }

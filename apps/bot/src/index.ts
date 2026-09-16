@@ -28,26 +28,21 @@ const API_BASE_URL = process.env.API_URL || 'http://localhost:3001';
 // Mapeamento de partida para o canal de texto do Discord
 const matchTextChannels = new Map<string, string>();
 
-// Estrutura de Fila por Rotas (Estilo LDDA / KaBuM High)
+// Estrutura de Fila Geral (Auto MMR e Rotas via /rotas)
 export interface QueuedPlayer {
   userId: string;
   tag: string;
   riotName?: string;
   riotTag?: string;
+  lanes: string[];
 }
 
-const laneQueue: Record<'TOP' | 'JUNGLE' | 'MID' | 'ADC' | 'SUPPORT', QueuedPlayer[]> = {
-  TOP: [],
-  JUNGLE: [],
-  MID: [],
-  ADC: [],
-  SUPPORT: [],
-};
+const generalQueue: QueuedPlayer[] = [];
+let currentQueueMode: GameMode = 'RANKED_AUTO';
 
-// Mapeamento de duos: userId -> partnerId
-const duoPairs = new Map<string, string>();
 let permanentQueueChannelId: string | null = null;
 let permanentQueueMessageId: string | null = null;
+let cachedBannerAttachmentUrl: string | null = null;
 let activeMatchesCount = 0;
 
 export const client = new Client({
@@ -60,18 +55,25 @@ export const client = new Client({
   ],
   partials: [Partials.Channel, Partials.Message],
 });
+
 client.once('ready', () => {
   console.log(`🥷 Nukenin Inhouse Bot online como ${client.user?.tag}`);
 
-  // Recupera configurações de fila permanente salvas
+  // Recupera configurações de fila permanente e modo salvas
   (async () => {
     try {
       const sRes = await fetch(`${API_BASE_URL}/api/settings`);
       const sData = await sRes.json();
-      if (sData.settings?.queueChannelId) {
-        permanentQueueChannelId = sData.settings.queueChannelId;
-        permanentQueueMessageId = sData.settings.queueMessageId || null;
-        console.log(`📌 Canal de fila permanente carregado: ${permanentQueueChannelId}, Msg: ${permanentQueueMessageId}`);
+      if (sData.settings) {
+        if (sData.settings.queueChannelId) {
+          permanentQueueChannelId = sData.settings.queueChannelId;
+          permanentQueueMessageId = sData.settings.queueMessageId || null;
+          console.log(`📌 Canal de fila permanente carregado: ${permanentQueueChannelId}, Msg: ${permanentQueueMessageId}`);
+        }
+        if (sData.settings.queueMode) {
+          currentQueueMode = sData.settings.queueMode;
+          console.log(`🎮 Modo de fila carregado: ${currentQueueMode}`);
+        }
       }
     } catch (e) {
       console.warn('Não foi possível carregar configurações de fila permanente na inicialização:', e);
@@ -234,11 +236,25 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    const selectedModo = interaction.options.getString('modo') as GameMode | null;
+    if (selectedModo) {
+      currentQueueMode = selectedModo;
+      await fetch(`${API_BASE_URL}/api/settings/queue-mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: selectedModo }),
+      }).catch((e) => console.warn('Falha ao sincronizar queue-mode:', e));
+    }
+
     try {
       const payload = await buildQueueEmbedAndButtons();
       const message = await targetChannel.send(payload);
       permanentQueueChannelId = targetChannel.id;
       permanentQueueMessageId = message.id;
+
+      if (message.attachments.size > 0) {
+        cachedBannerAttachmentUrl = message.attachments.first()?.url || null;
+      }
 
       // Salva no banco de dados Supabase para persistência contínua
       await fetch(`${API_BASE_URL}/api/settings/queue-message`, {
@@ -247,9 +263,37 @@ client.on('interactionCreate', async (interaction) => {
         body: JSON.stringify({ channelId: targetChannel.id, messageId: message.id }),
       });
 
-      await interaction.editReply(`✅ Painel oficial permanente da Fila NKN fixado com sucesso em <#${targetChannel.id}>!`);
+      await interaction.editReply(`✅ Painel oficial permanente da Fila NKN fixado com sucesso em <#${targetChannel.id}>! Modo: **${currentQueueMode}**`);
     } catch (e: any) {
       await interaction.editReply(`❌ Erro ao configurar painel de fila: ${e.message}`);
+    }
+  }
+
+  if (commandName === 'set-modo') {
+    await interaction.deferReply({ ephemeral: true });
+    const selectedModo = interaction.options.getString('modo', true) as GameMode;
+    currentQueueMode = selectedModo;
+
+    try {
+      await fetch(`${API_BASE_URL}/api/settings/queue-mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: selectedModo }),
+      });
+
+      if (interaction.guild) {
+        await updatePermanentQueueMessage(interaction.guild);
+      }
+
+      const modeLabels: Record<GameMode, string> = {
+        RANKED_AUTO: 'Ranked Competitiva (Auto MMR)',
+        RANKED_CAPTAIN: 'Capitães (Draft com Capitães)',
+        CASUAL_ARAM_ZOACAO: 'ARAM / Zoação (Casual)',
+      };
+
+      await interaction.editReply(`🎮 Modo da fila alterado para: **${modeLabels[selectedModo] || selectedModo}**! O painel permanente foi atualizado.`);
+    } catch (e: any) {
+      await interaction.editReply(`❌ Erro ao alterar modo da fila: ${e.message}`);
     }
   }
 
@@ -260,6 +304,10 @@ client.on('interactionCreate', async (interaction) => {
       const message = await (interaction.channel as any).send(payload);
       permanentQueueChannelId = interaction.channelId;
       permanentQueueMessageId = message.id;
+
+      if (message.attachments.size > 0) {
+        cachedBannerAttachmentUrl = message.attachments.first()?.url || null;
+      }
 
       await fetch(`${API_BASE_URL}/api/settings/queue-message`, {
         method: 'POST',
@@ -441,136 +489,102 @@ async function handleButtonQueue(interaction: ButtonInteraction) {
   const customId = interaction.customId;
 
   // 1. Botão Sair da Fila
-  if (customId === 'queue_lane_leave') {
-    let removed = false;
-    (['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'] as const).forEach((l) => {
-      const idx = laneQueue[l].findIndex((p) => p.userId === userId);
-      if (idx !== -1) {
-        laneQueue[l].splice(idx, 1);
-        removed = true;
-      }
-    });
-
-    // Se estava em duo, desfaz o duo
-    const partnerId = duoPairs.get(userId);
-    if (partnerId) {
-      duoPairs.delete(userId);
-      duoPairs.delete(partnerId);
+  if (customId === 'queue_leave') {
+    const idx = generalQueue.findIndex((p) => p.userId === userId);
+    if (idx !== -1) {
+      generalQueue.splice(idx, 1);
+      await interaction.reply({ content: '🚪 Você saiu da fila.', ephemeral: true });
+      await updatePermanentQueueMessage(interaction.guild!);
+    } else {
+      await interaction.reply({ content: '⚠️ Você não está na fila.', ephemeral: true });
     }
-
-    await interaction.reply({
-      content: removed ? '🚪 Você saiu da fila.' : '⚠️ Você não está na fila.',
-      ephemeral: true,
-    });
-    await updatePermanentQueueMessage(interaction.guild!);
     return;
   }
 
   // 2. Botão Lista de Jogadores na Fila
-  if (customId === 'queue_lane_players') {
-    const total = (['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'] as const).reduce(
-      (acc, l) => acc + laneQueue[l].length,
-      0
-    );
-
-    if (total === 0) {
+  if (customId === 'queue_players') {
+    if (generalQueue.length === 0) {
       await interaction.reply({ content: '📊 A fila está vazia no momento.', ephemeral: true });
       return;
     }
 
-    const lines: string[] = [];
-    (['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'] as const).forEach((l) => {
-      if (laneQueue[l].length > 0) {
-        lines.push(`**${l}**: ${laneQueue[l].map((p) => `<@${p.userId}> (${p.riotName ? `${p.riotName}#${p.riotTag}` : p.tag})`).join(', ')}`);
-      }
-    });
-
-    await interaction.reply({
-      content: `👥 **Jogadores na Fila (${total}):**\n${lines.join('\n')}`,
-      ephemeral: true,
-    });
-    return;
-  }
-
-  // 3. Botão Duo (Informativo / Em desenvolvimento amigável)
-  if (customId === 'queue_lane_duo') {
-    await interaction.reply({
-      content: '🤝 **Sistema de Duo**: Em breve! Para jogar juntos agora, entrem nas rotas desejadas no painel da fila.',
-      ephemeral: true,
-    });
-    return;
-  }
-
-  // 4. Seleção de Rotas (Top, Jungle, Mid, Adc, Sup)
-  const laneMap: Record<string, 'TOP' | 'JUNGLE' | 'MID' | 'ADC' | 'SUPPORT'> = {
-    queue_lane_top: 'TOP',
-    queue_lane_jungle: 'JUNGLE',
-    queue_lane_mid: 'MID',
-    queue_lane_adc: 'ADC',
-    queue_lane_sup: 'SUPPORT',
-  };
-
-  const selectedLane = laneMap[customId];
-  if (!selectedLane) return;
-
-  // Verifica se o jogador tem conta vinculada
-  try {
-    const profileRes = await fetch(`${API_BASE_URL}/api/players/${userId}`);
-    if (!profileRes.ok) {
-      await interaction.reply({
-        content: '❌ Você precisa vincular seu Riot ID antes de entrar na fila! Use `/vincular`.',
-        ephemeral: true,
-      });
-      return;
-    }
-
-    const profileData = await profileRes.json();
-    const profile = profileData.profile;
-
-    // Remove o jogador de qualquer rota que ele já estivesse
-    (['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'] as const).forEach((l) => {
-      const idx = laneQueue[l].findIndex((p) => p.userId === userId);
-      if (idx !== -1) laneQueue[l].splice(idx, 1);
-    });
-
-    // Adiciona na rota selecionada
-    laneQueue[selectedLane].push({
-      userId,
-      tag: interaction.user.tag,
-      riotName: profile?.riotGameName,
-      riotTag: profile?.riotTagLine,
-    });
-
-    await interaction.reply({
-      content: `🎯 Você entrou na fila de **${selectedLane}**!`,
-      ephemeral: true,
-    });
-
-    // Atualiza a mensagem permanente
-    await updatePermanentQueueMessage(interaction.guild!);
-
-    // Checa se atingiu 10 jogadores (2 de cada rota) para formar a partida
-    const isReady = (['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'] as const).every(
-      (l) => laneQueue[l].length >= 2
+    const lines = generalQueue.map(
+      (p, i) => `${i + 1}. <@${p.userId}> (${p.riotName ? `${p.riotName}#${p.riotTag}` : p.tag}) • Rotas: \`${p.lanes.join(', ')}\``
     );
 
-    if (isReady) {
-      const matchPlayers: string[] = [];
-      (['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'] as const).forEach((l) => {
-        const p1 = laneQueue[l].shift();
-        const p2 = laneQueue[l].shift();
-        if (p1) matchPlayers.push(p1.userId);
-        if (p2) matchPlayers.push(p2.userId);
+    await interaction.reply({
+      content: `👥 **Jogadores na Fila (${generalQueue.length}/10):**\n${lines.join('\n')}`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // 3. Botão Entrar na Fila
+  if (customId === 'queue_enter') {
+    try {
+      // Verifica se o jogador tem conta vinculada
+      const profileRes = await fetch(`${API_BASE_URL}/api/players/${userId}`);
+      if (!profileRes.ok) {
+        await interaction.reply({
+          content: '❌ Você precisa vincular seu Riot ID antes de entrar na fila! Use `/vincular`.',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const profileData = await profileRes.json();
+      const profile = profileData.profile;
+
+      // Verifica se tem rotas definidas
+      const registeredLanes: string[] = profile?.registeredLanes || [];
+      if (registeredLanes.length === 0) {
+        await interaction.reply({
+          content: '⚠️ Você precisa definir suas preferências de rotas antes de entrar na fila! Use `/rotas` (Ex: `/rotas rotas:TOP, MID`).',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      // Verifica se já está na fila
+      if (generalQueue.some((p) => p.userId === userId)) {
+        await interaction.reply({
+          content: '⚠️ Você já está na fila! Aguarde os outros jogadores entrarem.',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      // Adiciona na fila geral
+      generalQueue.push({
+        userId,
+        tag: interaction.user.tag,
+        riotName: profile?.riotGameName,
+        riotTag: profile?.riotTagLine,
+        lanes: registeredLanes,
       });
 
-      // Atualiza a mensagem permanente pós-pop
+      await interaction.reply({
+        content: `🎯 Você entrou na fila! Rotas configuradas: **${registeredLanes.join(', ')}** (${generalQueue.length}/10)`,
+        ephemeral: true,
+      });
+
+      // Atualiza o painel da fila em tempo real
       await updatePermanentQueueMessage(interaction.guild!);
 
-      // Dispara a criação da sala
-      await createMatchRoom(interaction.guild!, matchPlayers, 'RANKED_AUTO');
+      // Se atingiu 10 jogadores, fecha a fila e inicia a partida com balanceamento MMR e atribuição de rotas
+      if (generalQueue.length >= 10) {
+        const matchPlayers: string[] = [];
+        for (let i = 0; i < 10; i++) {
+          const p = generalQueue.shift();
+          if (p) matchPlayers.push(p.userId);
+        }
+
+        await updatePermanentQueueMessage(interaction.guild!);
+        await createMatchRoom(interaction.guild!, matchPlayers, currentQueueMode);
+      }
+    } catch (err: any) {
+      await interaction.reply({ content: `❌ Erro ao entrar na fila: ${err.message}`, ephemeral: true });
     }
-  } catch (err: any) {
-    await interaction.reply({ content: `❌ Erro: ${err.message}`, ephemeral: true });
   }
 }
 
@@ -658,20 +672,30 @@ async function createMatchRoom(guild: Guild, playerIds: string[], mode: GameMode
 
     await textChannel.send({ embeds: [embed] });
 
-    // Baixa o Card gerado pelo canvas nativo e anexa
-    try {
-      const cardRes = await fetch(`${API_BASE_URL}/api/matches/${matchId}/card`);
-      if (cardRes.ok) {
-        const arrayBuf = await cardRes.arrayBuffer();
-        const buffer = Buffer.from(arrayBuf);
-        const attachment = new AttachmentBuilder(buffer, { name: `card-${matchId}.png` });
-        await textChannel.send({ files: [attachment] });
+    // Move os jogadores para os respectivos canais de voz
+    for (const slot of match.blueTeam) {
+      try {
+        const member = await guild.members.fetch(slot.player.discordId);
+        if (member.voice.channel) {
+          await member.voice.setChannel(blueVoice);
+        }
+      } catch (err) {
+        // Ignora se não estiver em canal de voz
       }
-    } catch (e) {
-      console.error('Erro ao renderizar imagem do card:', e);
+    }
+
+    for (const slot of match.redTeam) {
+      try {
+        const member = await guild.members.fetch(slot.player.discordId);
+        if (member.voice.channel) {
+          await member.voice.setChannel(redVoice);
+        }
+      } catch (err) {
+        // Ignora se não estiver em canal de voz
+      }
     }
   } catch (err) {
-    console.error('Erro no createMatchRoom:', err);
+    console.error('Erro ao instanciar sala da partida:', err);
   }
 }
 
@@ -695,35 +719,33 @@ async function syncLaneRoles(guild: Guild, memberId: string, lanes: Lane[]) {
   }
 }
 
+// Limpa canais e retorna jogadores para a sala de espera após o término da partida
 async function cleanupMatchChannelsAndReturnPlayers(guild: Guild, matchId: string) {
   try {
-    // 1. Obtém a waiting room configurada
-    let waitingRoomId: string | undefined;
-    try {
-      const settingsRes = await fetch(`${API_BASE_URL}/api/settings`);
-      const settingsData = await settingsRes.json();
-      waitingRoomId = settingsData.settings?.waitingRoomVoiceId;
-    } catch (e) {
-      console.error('Erro ao consultar settings da waiting room:', e);
-    }
+    const cleanMatchId = matchId.replace(/^#/, '');
 
-    const cleanMatchId = matchId.toLowerCase();
+    // 1. Busca a sala de espera configurada
+    const res = await fetch(`${API_BASE_URL}/api/settings`);
+    const data = await res.json();
+    const waitingRoomId = data.settings?.waitingRoomVoiceId;
 
-    // 2. Encontra os canais de voz temporários da partida
-    const matchVoiceChannels = guild.channels.cache.filter(
-      (c) =>
-        c.type === ChannelType.GuildVoice &&
-        (c.name.toLowerCase().includes(cleanMatchId) || c.name.toLowerCase().includes(matchId.toLowerCase()))
+    // 2. Localiza os canais de voz da partida
+    const blueVoice = guild.channels.cache.find(
+      (c) => c.type === ChannelType.GuildVoice && c.name.toLowerCase().includes(`azul - #${cleanMatchId.toLowerCase()}`)
+    );
+    const redVoice = guild.channels.cache.find(
+      (c) => c.type === ChannelType.GuildVoice && c.name.toLowerCase().includes(`vermelho - #${cleanMatchId.toLowerCase()}`)
     );
 
-    // 3. Move os membros de volta para a waiting room se configurada
+    // 3. Move jogadores de volta para a waiting room
     if (waitingRoomId) {
-      const waitingRoom = guild.channels.cache.get(waitingRoomId);
+      const waitingRoom = await guild.channels.fetch(waitingRoomId).catch(() => null);
       if (waitingRoom && waitingRoom.type === ChannelType.GuildVoice) {
-        for (const [_, voiceChan] of matchVoiceChannels) {
-          if (voiceChan.isVoiceBased()) {
-            for (const [_, member] of voiceChan.members) {
-              await member.voice.setChannel(waitingRoomId).catch(() => null);
+        const voices = [blueVoice, redVoice].filter(Boolean);
+        for (const voice of voices) {
+          if (voice && voice.isVoiceBased()) {
+            for (const [_, member] of voice.members) {
+              await member.voice.setChannel(waitingRoom).catch(() => null);
             }
           }
         }
@@ -735,7 +757,7 @@ async function cleanupMatchChannelsAndReturnPlayers(guild: Guild, matchId: strin
       try {
         const channelsToDelete = guild.channels.cache.filter(
           (c) =>
-            c.name.toLowerCase().includes(cleanMatchId) ||
+            c.name.toLowerCase().includes(cleanMatchId.toLowerCase()) ||
             c.name.toLowerCase().includes(matchId.toLowerCase())
         );
 
@@ -751,59 +773,69 @@ async function cleanupMatchChannelsAndReturnPlayers(guild: Guild, matchId: strin
   }
 }
 
-// Função para construir o Embed e os Botões estilo LDDA / KaBuM High com o Banner NKN
-async function buildQueueEmbedAndButtons() {
-  const topCount = laneQueue.TOP.length;
-  const jgCount = laneQueue.JUNGLE.length;
-  const midCount = laneQueue.MID.length;
-  const adcCount = laneQueue.ADC.length;
-  const supCount = laneQueue.SUPPORT.length;
-  const totalInQueue = topCount + jgCount + midCount + adcCount + supCount;
+// Função para construir o Embed e os Botões estilo NKN Inhouse com o Banner NKN
+async function buildQueueEmbedAndButtons(imageUrl?: string) {
+  const totalInQueue = generalQueue.length;
 
-  const topList = topCount > 0 ? laneQueue.TOP.map((p) => `<@${p.userId}>`).join(', ') : '*(vazio)*';
-  const jgList = jgCount > 0 ? laneQueue.JUNGLE.map((p) => `<@${p.userId}>`).join(', ') : '*(vazio)*';
-  const midList = midCount > 0 ? laneQueue.MID.map((p) => `<@${p.userId}>`).join(', ') : '*(vazio)*';
-  const adcList = adcCount > 0 ? laneQueue.ADC.map((p) => `<@${p.userId}>`).join(', ') : '*(vazio)*';
-  const supList = supCount > 0 ? laneQueue.SUPPORT.map((p) => `<@${p.userId}>`).join(', ') : '*(vazio)*';
+  const modeLabels: Record<GameMode, string> = {
+    RANKED_AUTO: 'Ranked Competitiva (Auto MMR)',
+    RANKED_CAPTAIN: 'Capitães (Draft com Capitães)',
+    CASUAL_ARAM_ZOACAO: 'ARAM / Zoação (Casual)',
+  };
+
+  const modeTitle = modeLabels[currentQueueMode] || currentQueueMode;
+
+  const playerList =
+    totalInQueue > 0
+      ? generalQueue
+          .map((p, i) => `\`${i + 1}.\` <@${p.userId}> (${p.riotName ? `${p.riotName}#${p.riotTag}` : p.tag}) • \`${p.lanes.join(', ')}\``)
+          .join('\n')
+      : '*(Nenhum jogador na fila no momento)*';
 
   const embed = new EmbedBuilder()
-    .setTitle(`🥷 Fila NKN Inhouse (${totalInQueue}/10 Jogadores)`)
+    .setTitle(`🥷 Fila NKN Inhouse — (${totalInQueue}/10 Jogadores)`)
     .setDescription(
-      `🛡️ **(${topCount}/2)** Top: ${topList}\n` +
-      `🌲 **(${jgCount}/2)** Jungle: ${jgList}\n` +
-      `⚔️ **(${midCount}/2)** Mid: ${midList}\n` +
-      `🏹 **(${adcCount}/2)** Adc: ${adcList}\n` +
-      `💖 **(${supCount}/2)** Sup: ${supList}\n\n` +
-      `• 🕹️ \`${activeMatchesCount * 10} jogadores\` em partida no momento\n\n` +
-      `🏹 **Duos (0)**\nNenhum duo`
+      `🏆 **Modo Atual:** \`${modeTitle}\`\n` +
+      `📌 *A seleção de rotas e equipes é feita automaticamente via MMR com base no seu \`/rotas\`.*\n\n` +
+      `👥 **Jogadores na Fila (${totalInQueue}/10):**\n${playerList}\n\n` +
+      `• 🕹️ \`${activeMatchesCount * 10} jogadores\` em partida no momento`
     )
     .setColor('#7c3aed')
-    .setImage('attachment://queue_banner.png')
-    .setFooter({ text: 'Fila Competitiva NKN • Requer conta Riot vinculada (/vincular)' });
+    .setFooter({ text: 'Fila NKN Inhouse • Requer Riot ID (/vincular) e rotas salvas (/rotas)' });
 
-  // Linha 1: Rotas Principais
-  const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId('queue_lane_top').setLabel(`Top (${topCount}/2)`).setStyle(ButtonStyle.Success).setEmoji('🛡️'),
-    new ButtonBuilder().setCustomId('queue_lane_jungle').setLabel(`Jungle (${jgCount}/2)`).setStyle(ButtonStyle.Success).setEmoji('🌲'),
-    new ButtonBuilder().setCustomId('queue_lane_mid').setLabel(`Mid (${midCount}/2)`).setStyle(ButtonStyle.Primary).setEmoji('⚔️'),
-    new ButtonBuilder().setCustomId('queue_lane_adc').setLabel(`Adc (${adcCount}/2)`).setStyle(ButtonStyle.Primary).setEmoji('🏹'),
-    new ButtonBuilder().setCustomId('queue_lane_sup').setLabel(`Sup (${supCount}/2)`).setStyle(ButtonStyle.Primary).setEmoji('💖')
-  );
-
-  // Linha 2: Ações (Sair, Duo, Jogadores)
-  const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId('queue_lane_leave').setLabel('Sair').setStyle(ButtonStyle.Danger).setEmoji('🚪'),
-    new ButtonBuilder().setCustomId('queue_lane_duo').setLabel('Duo').setStyle(ButtonStyle.Primary).setEmoji('🤝'),
-    new ButtonBuilder().setCustomId('queue_lane_players').setLabel('Jogadores').setStyle(ButtonStyle.Secondary).setEmoji('🔎')
-  );
-
-  const bannerPath = path.resolve(__dirname, '../assets/queue_banner.png');
+  const finalImageUrl = imageUrl || cachedBannerAttachmentUrl;
   const files: AttachmentBuilder[] = [];
-  if (fs.existsSync(bannerPath)) {
-    files.push(new AttachmentBuilder(bannerPath, { name: 'queue_banner.png' }));
+
+  if (finalImageUrl) {
+    embed.setImage(finalImageUrl);
+  } else {
+    const bannerPath = path.resolve(__dirname, '../assets/queue_banner.png');
+    if (fs.existsSync(bannerPath)) {
+      files.push(new AttachmentBuilder(bannerPath, { name: 'queue_banner.png' }));
+      embed.setImage('attachment://queue_banner.png');
+    }
   }
 
-  return { embeds: [embed], components: [row1, row2], files };
+  // Controles da Fila: Entrar, Sair, Ver Jogadores
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId('queue_enter')
+      .setLabel('Entrar na Fila')
+      .setStyle(ButtonStyle.Success)
+      .setEmoji('🎯'),
+    new ButtonBuilder()
+      .setCustomId('queue_leave')
+      .setLabel('Sair da Fila')
+      .setStyle(ButtonStyle.Danger)
+      .setEmoji('🚪'),
+    new ButtonBuilder()
+      .setCustomId('queue_players')
+      .setLabel('Lista de Jogadores')
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji('👥')
+  );
+
+  return { embeds: [embed], components: [row], files };
 }
 
 // Atualiza a mensagem permanente existente ou recupera ela
@@ -817,7 +849,12 @@ async function updatePermanentQueueMessage(guild: Guild) {
     const message = await (channel as any).messages.fetch(permanentQueueMessageId).catch(() => null);
     if (!message) return;
 
-    const payload = await buildQueueEmbedAndButtons();
+    // Se já tiver attachment na mensagem original, armazena para manter cache
+    if (!cachedBannerAttachmentUrl && message.attachments.size > 0) {
+      cachedBannerAttachmentUrl = message.attachments.first()?.url || null;
+    }
+
+    const payload = await buildQueueEmbedAndButtons(cachedBannerAttachmentUrl || undefined);
     await message.edit({
       embeds: payload.embeds,
       components: payload.components,

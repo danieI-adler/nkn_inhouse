@@ -99,7 +99,9 @@ client.once('ready', () => {
 
 // Comandos e Interações de Fila
 client.on('interactionCreate', async (interaction) => {
+  console.log(`[Discord Bot] Interação recebida: tipo=${interaction.type}, usuario=${interaction.user.tag}`);
   if (interaction.isButton()) {
+    console.log(`[Discord Bot] Botão clicado: ${interaction.customId}`);
     handleButtonQueue(interaction);
     return;
   }
@@ -107,6 +109,7 @@ client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   const { commandName } = interaction;
+  console.log(`[Discord Bot] Comando de barra executado: /${commandName}`);
 
   if (commandName === 'vincular') {
     const riotId = interaction.options.getString('riot_id', true);

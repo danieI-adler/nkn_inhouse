@@ -151,24 +151,83 @@ export async function generateMatchCard(match: MatchData, draftState: DraftState
   }
 
   // 5. Rodapé: Informações da Sala e Bans
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
-  ctx.fillRect(0, height - 70, width, 70);
+  const footerY = height - 90;
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+  ctx.fillRect(0, footerY, width, 90);
   ctx.strokeStyle = '#334155';
   ctx.lineWidth = 1;
-  ctx.strokeRect(0, height - 70, width, 70);
+  ctx.strokeRect(0, footerY, width, 90);
 
+  // Bans do Time Azul (à esquerda)
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('BANS AZUL:', 60, footerY + 25);
+  for (let b = 0; b < 5; b++) {
+    const banId = draftState.blueBans[b];
+    const bx = 60 + b * 42;
+    const by = footerY + 34;
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
+    ctx.fillRect(bx, by, 36, 36);
+    ctx.strokeStyle = '#ef4444';
+    ctx.strokeRect(bx, by, 36, 36);
+
+    if (banId && banId !== 'None') {
+      try {
+        const banImg = await loadImage(`https://ddragon.leagueoflegends.com/cdn/${D_DRAGON_VER}/img/champion/${banId}.png`);
+        ctx.drawImage(banImg, bx, by, 36, 36);
+        // Efeito de risco diagonal de ban
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.lineTo(bx + 36, by + 36);
+        ctx.stroke();
+      } catch {}
+    }
+  }
+
+  // Bans do Time Vermelho (à direita)
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('BANS VERMELHO:', width - 60, footerY + 25);
+  for (let b = 0; b < 5; b++) {
+    const banId = draftState.redBans[b];
+    const bx = width - 60 - (5 - b) * 42;
+    const by = footerY + 34;
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
+    ctx.fillRect(bx, by, 36, 36);
+    ctx.strokeStyle = '#ef4444';
+    ctx.strokeRect(bx, by, 36, 36);
+
+    if (banId && banId !== 'None') {
+      try {
+        const banImg = await loadImage(`https://ddragon.leagueoflegends.com/cdn/${D_DRAGON_VER}/img/champion/${banId}.png`);
+        ctx.drawImage(banImg, bx, by, 36, 36);
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.lineTo(bx + 36, by + 36);
+        ctx.stroke();
+      } catch {}
+    }
+  }
+
+  // Sala no LoL no centro
   ctx.fillStyle = '#f1f5f9';
-  ctx.font = 'bold 15px sans-serif';
+  ctx.font = 'bold 16px sans-serif';
   ctx.textAlign = 'center';
   ctx.fillText(
     `Sala no LoL: ${match.roomName}   |   Senha: ${match.roomPassword}`,
     width / 2,
-    height - 38
+    footerY + 40
   );
 
-  ctx.fillStyle = '#64748b';
+  ctx.fillStyle = '#a78bfa';
   ctx.font = '12px sans-serif';
-  ctx.fillText('Nukenin Community Inhouse • Partida Gerada Automaticamente', width / 2, height - 16);
+  ctx.fillText('Nukenin Community Inhouse • Partida Gerada Automaticamente', width / 2, footerY + 68);
 
   return canvas.toBuffer('image/png');
 }

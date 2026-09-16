@@ -71,6 +71,16 @@ const commands = [
         .setDescription('Canal de voz geral / sala de espera')
         .setRequired(true)
     ),
+
+  new SlashCommandBuilder()
+    .setName('perfil')
+    .setDescription('Exibe o perfil inhouse e de League of Legends de um jogador (Elo, MMR, Campeões mais jogados)')
+    .addUserOption((option) =>
+      option
+        .setName('usuario')
+        .setDescription('Membro do Discord cujo perfil deseja visualizar (deixe vazio para ver o seu)')
+        .setRequired(false)
+    ),
 ].map((cmd) => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(token);

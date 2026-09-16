@@ -108,4 +108,60 @@ export class RiotService {
       seedMmr,
     };
   }
+
+  /**
+   * Obtém os top 3 campeões mais jogados (Champion Mastery v4)
+   */
+  async getTopChampionMasteries(puuid: string): Promise<{ id: string; name: string; level: number; points: number }[]> {
+    if (!this.apiKey || puuid.startsWith('mock-puuid')) {
+      return [
+        { id: 'Yasuo', name: 'Yasuo', level: 7, points: 250000 },
+        { id: 'Yone', name: 'Yone', level: 7, points: 180000 },
+        { id: 'Zed', name: 'Zed', level: 6, points: 95000 },
+      ];
+    }
+
+    try {
+      const url = `https://${this.platformRoute}.api.riotgames.com/lol/champion-mastery/v4/champion-masteries/by-puuid/${puuid}/top?count=3`;
+      const res = await fetch(url, {
+        headers: { 'X-Riot-Token': this.apiKey },
+      });
+
+      if (!res.ok) {
+        console.warn(`[RiotService] Erro ao buscar maestrias (${res.status})`);
+        return [];
+      }
+
+      const masteries: any[] = await res.json();
+      
+      // Carrega mapeamento id <-> nome do Data Dragon
+      let champMap: Record<string, { id: string; name: string }> = {};
+      try {
+        const ddRes = await fetch('https://ddragon.leagueoflegends.com/cdn/14.10.1/data/en_US/champion.json');
+        if (ddRes.ok) {
+          const ddData: any = await ddRes.json();
+          Object.values(ddData.data).forEach((c: any) => {
+            champMap[c.key] = { id: c.id, name: c.name };
+          });
+        }
+      } catch (ddErr) {
+        console.warn('[RiotService] Erro ao carregar Data Dragon para maestrias:', ddErr);
+      }
+
+      return masteries.map((m) => {
+        const key = String(m.championId);
+        const mapped = champMap[key];
+        return {
+          id: mapped ? mapped.id : key,
+          name: mapped ? mapped.name : `Campeão ${key}`,
+          level: m.championLevel,
+          points: m.championPoints,
+        };
+      });
+    } catch (err: any) {
+      console.warn('[RiotService] Falha ao carregar maestrias:', err.message);
+      return [];
+    }
+  }
 }
+

@@ -43,6 +43,7 @@ async function start() {
     try {
       const riotAcc = await riotService.getAccountByRiotId(gameName, tagLine);
       const rankInfo = await riotService.getSoloQRankByPuuid(riotAcc.puuid);
+      const topChamps = await riotService.getTopChampionMasteries(riotAcc.puuid);
 
       let profile = db.getPlayer(discordId);
       if (!profile) {
@@ -61,6 +62,7 @@ async function start() {
           wins: 0,
           losses: 0,
           registeredLanes: ['FILL'],
+          topChampions: topChamps,
         };
       } else {
         profile.riotGameName = riotAcc.gameName;
@@ -69,6 +71,7 @@ async function start() {
         profile.riotRankTier = rankInfo.tier;
         profile.riotRankDivision = rankInfo.division;
         profile.riotLp = rankInfo.lp;
+        profile.topChampions = topChamps;
       }
 
       db.setPlayer(discordId, profile);
@@ -99,6 +102,17 @@ async function start() {
     if (!profile) {
       return reply.status(404).send({ success: false, message: 'Perfil não encontrado.' });
     }
+
+    // Se ainda não tiver topChampions salvo no perfil, tenta buscar dinamicamente
+    if ((!profile.topChampions || profile.topChampions.length === 0) && profile.puuid) {
+      try {
+        profile.topChampions = await riotService.getTopChampionMasteries(profile.puuid);
+        db.setPlayer(profile.discordId, profile);
+      } catch (e) {
+        // Ignora erro eventual
+      }
+    }
+
     return reply.send({ success: true, profile });
   });
 
@@ -182,6 +196,9 @@ async function start() {
         // Callback de Draft Concluído
         match.status = 'IN_PROGRESS';
         db.setMatch(matchId, match);
+
+        // Notifica o bot do Discord para postar a imagem do card finalizado
+        io.emit('draft_completed_broadcast', { matchId });
       }
     );
 

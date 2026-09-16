@@ -15,6 +15,7 @@ export interface PlayerProfile {
   wins: number;
   losses: number;
   registeredLanes: Lane[];
+  topChampions?: { id: string; name: string; level: number; points: number }[];
 }
 
 export type GameMode = 'RANKED_AUTO' | 'RANKED_CAPTAIN' | 'CASUAL_ARAM_ZOACAO';

@@ -13,6 +13,7 @@ import {
   Guild,
   AttachmentBuilder,
 } from 'discord.js';
+import { io as createSocketClient } from 'socket.io-client';
 import * as dotenv from 'dotenv';
 import path from 'path';
 import { GameMode, Lane } from '@nkn/shared';
@@ -21,6 +22,9 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 dotenv.config();
 
 const API_BASE_URL = process.env.API_URL || 'http://localhost:3001';
+
+// Mapeamento de partida para o canal de texto do Discord
+const matchTextChannels = new Map<string, string>();
 
 // Filas ativas em memória
 const queueState = {
@@ -42,6 +46,55 @@ export const client = new Client({
 
 client.once('ready', () => {
   console.log(`🥷 Nukenin Inhouse Bot online como ${client.user?.tag}`);
+
+  // Conecta ao Socket.io da API para escutar término do draft
+  try {
+    const socket = createSocketClient(API_BASE_URL);
+    socket.on('connect', () => {
+      console.log('📡 Bot conectado ao WebSocket da API Nukenin!');
+    });
+
+    socket.on('draft_completed_broadcast', async ({ matchId }: { matchId: string }) => {
+      console.log(`📸 Draft finalizado para a partida #${matchId}! Gerando e enviando print do draft...`);
+      const channelId = matchTextChannels.get(matchId);
+      if (!channelId) return;
+
+      try {
+        const channel = await client.channels.fetch(channelId);
+        if (channel && channel.isTextBased() && 'send' in channel) {
+          // Aguarda 1 segundo para garantir que o estado final do draft foi consolidado
+          setTimeout(async () => {
+            try {
+              const cardRes = await fetch(`${API_BASE_URL}/api/matches/${matchId}/card`);
+              if (cardRes.ok) {
+                const arrayBuf = await cardRes.arrayBuffer();
+                const buffer = Buffer.from(arrayBuf);
+                const attachment = new AttachmentBuilder(buffer, { name: `draft-final-${matchId}.png` });
+
+                const embed = new EmbedBuilder()
+                  .setTitle(`✅ DRAFT FINALIZADO - #${matchId.toUpperCase()}`)
+                  .setDescription(
+                    `O draft da partida terminou! As escolhas e bans foram definidos.\n` +
+                    `🎮 Entrem na sala personalizada do LoL e iniciem a partida!`
+                  )
+                  .setColor('#10b981')
+                  .setImage(`attachment://draft-final-${matchId}.png`)
+                  .setFooter({ text: 'Inhouse Nukenin • Use /resultado ao finalizar o jogo' });
+
+                await (channel as any).send({ embeds: [embed], files: [attachment] });
+              }
+            } catch (cardErr) {
+              console.error('Erro ao enviar card final do draft:', cardErr);
+            }
+          }, 1200);
+        }
+      } catch (err) {
+        console.error('Erro ao processar envio do print do draft:', err);
+      }
+    });
+  } catch (socketErr) {
+    console.error('Erro ao inicializar conexão socket do bot:', socketErr);
+  }
 });
 
 // Comandos e Interações de Fila
@@ -215,6 +268,80 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 
+  if (commandName === 'perfil') {
+    const targetUser = interaction.options.getUser('usuario') || interaction.user;
+    await interaction.deferReply();
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/players/${targetUser.id}`);
+      const data = await res.json();
+
+      if (!res.ok || !data.success || !data.profile) {
+        await interaction.editReply(`❌ O usuário <@${targetUser.id}> ainda não vinculou sua conta Riot (use \`/vincular\`).`);
+        return;
+      }
+
+      const p = data.profile;
+      const totalGames = p.matchesPlayed || 0;
+      const winrate = totalGames > 0 ? Math.round((p.wins / totalGames) * 100) : 0;
+      const opggUrl = `https://www.op.gg/summoners/br/${encodeURIComponent(p.riotGameName)}-${encodeURIComponent(p.riotTagLine)}`;
+
+      let champsText = 'Sem dados de maestria disponíveis.';
+      if (p.topChampions && p.topChampions.length > 0) {
+        champsText = p.topChampions
+          .map(
+            (c: any, i: number) =>
+              `${i + 1}. **${c.name}** • Maestria Lv ${c.level} • \`${c.points.toLocaleString('pt-BR')} pts\``
+          )
+          .join('\n');
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle(`🥷 Perfil Inhouse • ${p.riotGameName}#${p.riotTagLine}`)
+        .setDescription(`Informações de invocador e desempenho competitivo de <@${targetUser.id}>`)
+        .setThumbnail(targetUser.displayAvatarURL())
+        .setColor('#7c3aed')
+        .addFields(
+          {
+            name: '🏆 Elo SoloQ (LoL)',
+            value: `**${p.riotRankTier} ${p.riotRankDivision}** (${p.riotLp} LP)`,
+            inline: true,
+          },
+          {
+            name: '⚡ MMR Inhouse',
+            value: `**${p.internalMmr}**`,
+            inline: true,
+          },
+          {
+            name: '🎯 Rotas Principais',
+            value: `\`${p.registeredLanes?.join(', ') || 'FILL'}\``,
+            inline: true,
+          },
+          {
+            name: '📊 Estatísticas Inhouse',
+            value: `**${totalGames}** jogos • **${p.wins}**V / **${p.losses}**D (${winrate}% WR)`,
+            inline: true,
+          },
+          {
+            name: '🔗 Links Externos',
+            value: `[Ver Perfil no OP.GG](${opggUrl})`,
+            inline: true,
+          },
+          {
+            name: '⭐ Campeões Mais Jogados (Maestria)',
+            value: champsText,
+            inline: false,
+          }
+        )
+        .setFooter({ text: 'Nukenin League • Dados integrados via Riot Games API' })
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [embed] });
+    } catch (err: any) {
+      await interaction.editReply(`❌ Falha ao buscar perfil: ${err.message}`);
+    }
+  }
+
   if (commandName === 'resultado') {
     const matchId = interaction.options.getString('partida_id', true);
     const winner = interaction.options.getString('vencedor', true).toUpperCase() as 'BLUE' | 'RED';
@@ -333,6 +460,8 @@ async function createMatchRoom(guild: Guild, playerIds: string[], mode: GameMode
         })),
       ],
     });
+
+    matchTextChannels.set(matchId, textChannel.id);
 
     const blueVoice = await guild.channels.create({
       name: `🔊 Time Azul - #${matchId}`,

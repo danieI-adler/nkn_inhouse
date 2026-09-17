@@ -75,6 +75,33 @@ client.once('ready', () => {
           console.log(`🎮 Modo de fila carregado: ${currentQueueMode}`);
         }
       }
+
+      // Hardcode / Auto-preenchimento temporário para testes:
+      // Coloca automaticamente todos os jogadores vinculados na fila
+      const lRes = await fetch(`${API_BASE_URL}/api/leaderboard`);
+      const lData = await lRes.json();
+      if (lData.leaderboard && Array.isArray(lData.leaderboard)) {
+        for (const p of lData.leaderboard) {
+          if (!generalQueue.some((q) => q.userId === p.discordId)) {
+            generalQueue.push({
+              userId: p.discordId,
+              tag: p.discordTag || p.riotGameName || 'Player',
+              riotName: p.riotGameName,
+              riotTag: p.riotTagLine,
+              lanes: p.registeredLanes && p.registeredLanes.length > 0 ? p.registeredLanes : ['FILL'],
+            });
+          }
+        }
+        console.log(`🎯 [Auto-Fila Teste] ${generalQueue.length} jogadores vinculados inseridos na fila.`);
+      }
+
+      // Atualiza o painel permanente no Discord com a lista populada
+      if (process.env.GUILD_ID) {
+        const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
+        if (guild) {
+          await updatePermanentQueueMessage(guild);
+        }
+      }
     } catch (e) {
       console.warn('Não foi possível carregar configurações de fila permanente na inicialização:', e);
     }

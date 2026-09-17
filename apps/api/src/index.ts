@@ -37,6 +37,11 @@ async function start() {
     draftEngine.handleSocketConnection(socket);
   });
 
+  // Health check para o Render
+  server.get('/', async (_request, reply) => {
+    return reply.send({ status: 'ok', service: 'nkn-inhouse-api' });
+  });
+
   // 1. Rota de Vinculação de Conta Riot
   server.post<{
     Body: { discordId: string; discordTag: string; gameName: string; tagLine: string };

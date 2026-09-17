@@ -1,13 +1,17 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { io, Socket } from 'socket.io-client';
 import {
   Search,
   ShieldAlert,
   Swords,
-  Plus,
   RotateCcw,
   Trophy,
   Check,
   ArrowRightLeft,
+  Users,
+  Radio,
+  Flame,
+  Clock,
 } from 'lucide-react';
 
 const DEFAULT_DDRAGON_VER = '16.18.1';
@@ -151,32 +155,45 @@ export default function App() {
   const isCompleted = stepIndex >= DRAFT_SEQUENCE.length;
   const currentStep = isCompleted ? null : DRAFT_SEQUENCE[stepIndex];
 
+  // Conexão e sincronização via Socket.io
+  const socketRef = useRef<Socket | null>(null);
+  const [matchId, setMatchId] = useState<string>('');
+  const [captainToken, setCaptainToken] = useState<string>('');
+  const [userRole, setUserRole] = useState<'BLUE_CAPTAIN' | 'RED_CAPTAIN' | 'SPECTATOR'>('SPECTATOR');
+  const [draftPhase, setDraftPhase] = useState<string>('READY_CHECK');
+  const [blueReady, setBlueReady] = useState(false);
+  const [redReady, setRedReady] = useState(false);
+  const [blueConnected, setBlueConnected] = useState(false);
+  const [redConnected, setRedConnected] = useState(false);
+  const [isSocketMode, setIsSocketMode] = useState(false);
+
   // Sincronização via Socket.io com o Backend da Inhouse (jogadores reais do Discord)
   useEffect(() => {
-    // Suporta query params diretos (?matchId=...&token=...), hash (#/draft/matchId?token=...) ou path (/draft/matchId)
     const hash = window.location.hash || '';
     const hashSearch = hash.includes('?') ? hash.substring(hash.indexOf('?')) : '';
     const urlParams = new URLSearchParams(window.location.search || hashSearch);
 
-    let matchId = urlParams.get('matchId') || '';
-    const token = urlParams.get('token') || '';
+    let mId = urlParams.get('matchId') || '';
+    const tok = urlParams.get('token') || '';
 
-    if (!matchId) {
-      // Tenta extrair do hash: #/draft/nkn-1234
+    if (!mId) {
       const hashMatch = hash.match(/\/draft\/([^/?#]+)/);
       if (hashMatch) {
-        matchId = hashMatch[1];
+        mId = hashMatch[1];
       } else {
-        // Tenta extrair do path
         const pathParts = window.location.pathname.split('/');
         const draftIdx = pathParts.indexOf('draft');
         if (draftIdx !== -1 && pathParts[draftIdx + 1]) {
-          matchId = pathParts[draftIdx + 1];
+          mId = pathParts[draftIdx + 1];
         }
       }
     }
 
-    if (!matchId) return;
+    if (!mId) return;
+
+    setMatchId(mId);
+    setCaptainToken(tok);
+    setIsSocketMode(true);
 
     const apiUrl =
       import.meta.env.VITE_API_URL ||
@@ -184,19 +201,94 @@ export default function App() {
         ? 'https://nkn-inhouse-service.onrender.com'
         : 'http://localhost:3001');
 
-    import('socket.io-client').then(({ io }) => {
-      const socket = io(apiUrl);
-      socket.emit('join_draft', { matchId, token });
+    const socket = io(apiUrl);
+    socketRef.current = socket;
 
-      socket.on('draft_init', (data: any) => {
-        if (data.state?.blueSlots && data.state.blueSlots.length === 5) {
-          setBluePlayers(data.state.blueSlots.map((s: any) => s.discordTag || s.riotId));
-        }
-        if (data.state?.redSlots && data.state.redSlots.length === 5) {
-          setRedPlayers(data.state.redSlots.map((s: any) => s.discordTag || s.riotId));
-        }
-      });
+    socket.on('connect', () => {
+      console.log('📡 Conectado ao servidor de draft da Nukenin!');
+      socket.emit('join_draft', { matchId: mId, token: tok });
     });
+
+    const syncState = (state: any, role?: string) => {
+      if (!state) return;
+      if (role) {
+        setUserRole(role as any);
+        if (role === 'BLUE_CAPTAIN') setControlMode('BLUE_ONLY');
+        else if (role === 'RED_CAPTAIN') setControlMode('RED_ONLY');
+        else setControlMode('SPECTATOR' as any);
+      }
+
+      setDraftPhase(state.phase || 'READY_CHECK');
+      setBlueReady(Boolean(state.blueReady));
+      setRedReady(Boolean(state.redReady));
+      setBlueConnected(Boolean(state.blueConnected));
+      setRedConnected(Boolean(state.redConnected));
+
+      if (state.timerSecondsRemaining !== undefined) {
+        setTimer(state.timerSecondsRemaining);
+      }
+
+      if (state.stepIndex !== undefined) {
+        setStepIndex(state.stepIndex);
+      }
+
+      if (state.blueSlots && state.blueSlots.length === 5) {
+        setBluePlayers(state.blueSlots.map((s: any) => s.discordTag || s.riotId));
+      }
+      if (state.redSlots && state.redSlots.length === 5) {
+        setRedPlayers(state.redSlots.map((s: any) => s.discordTag || s.riotId));
+      }
+
+      if (Array.isArray(state.blueBans)) {
+        setBlueBans(state.blueBans.map((b: string) => ({ id: b, name: b, roles: [] })));
+      }
+      if (Array.isArray(state.redBans)) {
+        setRedBans(state.redBans.map((b: string) => ({ id: b, name: b, roles: [] })));
+      }
+      if (Array.isArray(state.bluePicks)) {
+        setBluePicks(state.bluePicks.map((p: any) => ({ id: p.championId, name: p.championName, roles: [] })));
+      }
+      if (Array.isArray(state.redPicks)) {
+        setRedPicks(state.redPicks.map((p: any) => ({ id: p.championId, name: p.championName, roles: [] })));
+      }
+    };
+
+    socket.on('draft_init', (data: any) => {
+      syncState(data.state, data.userRole);
+    });
+
+    socket.on('user_joined', (data: any) => {
+      if (data.state) syncState(data.state);
+    });
+
+    socket.on('ready_status_update', (data: any) => {
+      syncState(data.state);
+    });
+
+    socket.on('draft_started', (data: any) => {
+      syncState(data.state);
+    });
+
+    socket.on('draft_update', (data: any) => {
+      syncState(data.state);
+      setSelectedChampion(null);
+    });
+
+    socket.on('timer_tick', (data: { secondsRemaining: number }) => {
+      setTimer(data.secondsRemaining);
+      if (data.secondsRemaining <= 30 && draftPhase === 'SWAP_ROLES') {
+        setSwapTimer(data.secondsRemaining);
+      }
+    });
+
+    socket.on('draft_completed', (data: any) => {
+      syncState(data.state);
+      setIsFullyFinalized(true);
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, []);
 
   // 1. Carrega dinamicamente a versão mais recente e todos os campeões oficiais via Data Dragon
@@ -316,10 +408,30 @@ export default function App() {
     executeAction(randomChamp);
   };
 
+  // Envia confirmação de "Pronto" ao backend
+  const handleCaptainReady = () => {
+    if (socketRef.current && matchId && captainToken) {
+      socketRef.current.emit('captain_ready', { matchId, token: captainToken });
+    }
+  };
+
   // Executa Ban ou Pick
   const executeAction = (champ: ChampionData) => {
     if (!currentStep || isCompleted) return;
 
+    // Se estiver conectado via socket, envia para a API sincronizar ambas as telas!
+    if (isSocketMode && socketRef.current && matchId && captainToken) {
+      socketRef.current.emit('submit_action', {
+        matchId,
+        token: captainToken,
+        championId: champ.id,
+        championName: champ.name,
+      });
+      setSelectedChampion(null);
+      return;
+    }
+
+    // Modo simulador local offline
     if (currentStep.type === 'BAN') {
       if (currentStep.team === 'BLUE') setBlueBans((prev) => [...prev, champ]);
       else setRedBans((prev) => [...prev, champ]);
@@ -397,12 +509,18 @@ export default function App() {
   };
 
   const canUserAct = useMemo(() => {
+    if (draftPhase === 'READY_CHECK') return false;
     if (isCompleted || !currentStep) return false;
+    if (isSocketMode) {
+      if (userRole === 'BLUE_CAPTAIN' && currentStep.team === 'BLUE') return true;
+      if (userRole === 'RED_CAPTAIN' && currentStep.team === 'RED') return true;
+      return false;
+    }
     if (controlMode === 'SOLO_SIMULATOR') return true;
     if (controlMode === 'BLUE_ONLY' && currentStep.team === 'BLUE') return true;
     if (controlMode === 'RED_ONLY' && currentStep.team === 'RED') return true;
     return false;
-  }, [controlMode, currentStep, isCompleted]);
+  }, [controlMode, currentStep, isCompleted, draftPhase, isSocketMode, userRole]);
 
   // Helper para URL de Imagem (Data Dragon vs Campeões Customizados)
   const getAvatarUrl = (c: ChampionData) => {
@@ -433,56 +551,212 @@ export default function App() {
           </div>
         </div>
 
-        {/* Controles de Simulação */}
+        {/* Controles de Simulação & Status da Conexão */}
         <div className="flex items-center gap-3">
-          <div className="bg-[#140c2b] border border-purple-900/60 rounded-lg p-1 flex items-center text-xs">
-            <button
-              onClick={() => setControlMode('SOLO_SIMULATOR')}
-              className={`px-3 py-1 rounded transition font-medium ${
-                controlMode === 'SOLO_SIMULATOR'
-                  ? 'bg-purple-600 text-white shadow'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              🎮 Ambos os Lados
-            </button>
-            <button
-              onClick={() => setControlMode('BLUE_ONLY')}
-              className={`px-3 py-1 rounded transition font-medium ${
-                controlMode === 'BLUE_ONLY'
-                  ? 'bg-sky-600 text-white shadow'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              🔵 Apenas Azul
-            </button>
-            <button
-              onClick={() => setControlMode('RED_ONLY')}
-              className={`px-3 py-1 rounded transition font-medium ${
-                controlMode === 'RED_ONLY'
-                  ? 'bg-rose-600 text-white shadow'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              🔴 Apenas Vermelho
-            </button>
-          </div>
+          {isSocketMode ? (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-950/60 border border-purple-800/50">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="text-xs font-mono font-bold text-purple-200">
+                {userRole === 'BLUE_CAPTAIN'
+                  ? '🔵 VOCÊ É O CAPITÃO AZUL'
+                  : userRole === 'RED_CAPTAIN'
+                  ? '🔴 VOCÊ É O CAPITÃO VERMELHO'
+                  : '👁️ MODO ESPECTADOR'}
+              </span>
+            </div>
+          ) : (
+            <div className="bg-[#140c2b] border border-purple-900/60 rounded-lg p-1 flex items-center text-xs">
+              <button
+                onClick={() => setControlMode('SOLO_SIMULATOR')}
+                className={`px-3 py-1 rounded transition font-medium ${
+                  controlMode === 'SOLO_SIMULATOR'
+                    ? 'bg-purple-600 text-white shadow'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                🎮 Ambos os Lados
+              </button>
+              <button
+                onClick={() => setControlMode('BLUE_ONLY')}
+                className={`px-3 py-1 rounded transition font-medium ${
+                  controlMode === 'BLUE_ONLY'
+                    ? 'bg-sky-600 text-white shadow'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                🔵 Apenas Azul
+              </button>
+              <button
+                onClick={() => setControlMode('RED_ONLY')}
+                className={`px-3 py-1 rounded transition font-medium ${
+                  controlMode === 'RED_ONLY'
+                    ? 'bg-rose-600 text-white shadow'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                🔴 Apenas Vermelho
+              </button>
+            </div>
+          )}
 
-          <button
-            onClick={() => setIsPaused(!isPaused)}
-            className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 text-xs font-semibold transition"
-          >
-            {isPaused ? '▶️ Despausar' : '⏸️ Pausar'}
-          </button>
+          {!isSocketMode && (
+            <>
+              <button
+                onClick={() => setIsPaused(!isPaused)}
+                className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 text-xs font-semibold transition"
+              >
+                {isPaused ? '▶️ Despausar' : '⏸️ Pausar'}
+              </button>
 
-          <button
-            onClick={handleResetDraft}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-950/50 hover:bg-red-900/60 border border-red-800/40 text-red-200 text-xs font-semibold transition"
-          >
-            <RotateCcw className="w-3.5 h-3.5" /> Reiniciar
-          </button>
+              <button
+                onClick={handleResetDraft}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-950/50 hover:bg-red-900/60 border border-red-800/40 text-red-200 text-xs font-semibold transition"
+              >
+                <RotateCcw className="w-3.5 h-3.5" /> Reiniciar
+              </button>
+            </>
+          )}
         </div>
       </header>
+
+      {/* ===================== TELA DE READY CHECK (ESTILO DRAFTER.LOL) ===================== */}
+      {isSocketMode && draftPhase === 'READY_CHECK' && (
+        <div className="fixed inset-0 z-50 bg-[#06040d]/90 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+          <div className="max-w-2xl w-full bg-[#100b24] border border-purple-500/40 rounded-3xl p-8 shadow-2xl flex flex-col items-center text-center relative overflow-hidden">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-600 to-indigo-600 flex items-center justify-center font-bold text-3xl shadow-xl shadow-purple-600/50 mb-4 border border-purple-400/40">
+              ⚔️
+            </div>
+
+            <h2 className="text-3xl font-extrabold font-mono tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-white to-purple-300">
+              SALA DE DRAFT NUKENIN
+            </h2>
+            <p className="text-gray-400 text-sm mt-1 mb-8 max-w-md">
+              Ambos os capitães precisam confirmar que estão prontos para iniciar o cronômetro oficial de picks e bans.
+            </p>
+
+            <div className="grid grid-cols-2 gap-6 w-full mb-8">
+              {/* Card Capitão Azul */}
+              <div
+                className={`p-5 rounded-2xl border transition-all flex flex-col items-center gap-3 ${
+                  blueReady
+                    ? 'border-emerald-500/80 bg-emerald-950/20 shadow-lg shadow-emerald-500/20'
+                    : blueConnected
+                    ? 'border-sky-500/50 bg-sky-950/20 shadow-lg shadow-sky-500/10'
+                    : 'border-white/10 bg-black/40'
+                }`}
+              >
+                <div className="w-12 h-12 rounded-full flex items-center justify-center bg-sky-950 border border-sky-500/40 text-sky-300 font-bold text-lg">
+                  🔵
+                </div>
+                <div className="flex flex-col">
+                  <span className="font-bold text-base text-sky-300 font-mono">TIME AZUL</span>
+                  <span className="text-xs text-gray-400">{bluePlayers[0] || 'Capitão Azul'}</span>
+                </div>
+                <div className="mt-1">
+                  {blueReady ? (
+                    <span className="px-3 py-1 bg-emerald-500/20 border border-emerald-400/60 rounded-full text-emerald-300 font-mono text-xs font-bold flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5" /> PRONTO
+                    </span>
+                  ) : blueConnected ? (
+                    <span className="px-3 py-1 bg-sky-500/10 border border-sky-400/40 rounded-full text-sky-300 font-mono text-xs flex items-center gap-1.5">
+                      <Radio className="w-3.5 h-3.5 animate-pulse" /> CONECTADO
+                    </span>
+                  ) : (
+                    <span className="px-3 py-1 bg-gray-800/40 border border-gray-700 rounded-full text-gray-500 font-mono text-xs">
+                      AGUARDANDO CONEXÃO
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Card Capitão Vermelho */}
+              <div
+                className={`p-5 rounded-2xl border transition-all flex flex-col items-center gap-3 ${
+                  redReady
+                    ? 'border-emerald-500/80 bg-emerald-950/20 shadow-lg shadow-emerald-500/20'
+                    : redConnected
+                    ? 'border-rose-500/50 bg-rose-950/20 shadow-lg shadow-rose-500/10'
+                    : 'border-white/10 bg-black/40'
+                }`}
+              >
+                <div className="w-12 h-12 rounded-full flex items-center justify-center bg-rose-950 border border-rose-500/40 text-rose-300 font-bold text-lg">
+                  🔴
+                </div>
+                <div className="flex flex-col">
+                  <span className="font-bold text-base text-rose-300 font-mono">TIME VERMELHO</span>
+                  <span className="text-xs text-gray-400">{redPlayers[0] || 'Capitão Vermelho'}</span>
+                </div>
+                <div className="mt-1">
+                  {redReady ? (
+                    <span className="px-3 py-1 bg-emerald-500/20 border border-emerald-400/60 rounded-full text-emerald-300 font-mono text-xs font-bold flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5" /> PRONTO
+                    </span>
+                  ) : redConnected ? (
+                    <span className="px-3 py-1 bg-rose-500/10 border border-rose-400/40 rounded-full text-rose-300 font-mono text-xs flex items-center gap-1.5">
+                      <Radio className="w-3.5 h-3.5 animate-pulse" /> CONECTADO
+                    </span>
+                  ) : (
+                    <span className="px-3 py-1 bg-gray-800/40 border border-gray-700 rounded-full text-gray-500 font-mono text-xs">
+                      AGUARDANDO CONEXÃO
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Botão de Confirmação do Usuário Atual */}
+            {userRole === 'BLUE_CAPTAIN' && (
+              <button
+                onClick={handleCaptainReady}
+                disabled={blueReady}
+                className={`w-full py-4 rounded-2xl font-bold text-lg font-mono tracking-wider transition shadow-2xl flex items-center justify-center gap-2 ${
+                  blueReady
+                    ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-sky-500/40 cursor-pointer animate-pulse'
+                }`}
+              >
+                {blueReady ? (
+                  <>
+                    <Check className="w-6 h-6" /> VOCÊ ESTÁ PRONTO! AGUARDANDO ADVERSÁRIO...
+                  </>
+                ) : (
+                  <>
+                    <Flame className="w-6 h-6" /> ESTOU PRONTO (ESTILO DRAFTER.LOL)
+                  </>
+                )}
+              </button>
+            )}
+
+            {userRole === 'RED_CAPTAIN' && (
+              <button
+                onClick={handleCaptainReady}
+                disabled={redReady}
+                className={`w-full py-4 rounded-2xl font-bold text-lg font-mono tracking-wider transition shadow-2xl flex items-center justify-center gap-2 ${
+                  redReady
+                    ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-rose-600 to-purple-600 hover:from-rose-500 hover:to-purple-500 text-white shadow-rose-500/40 cursor-pointer animate-pulse'
+                }`}
+              >
+                {redReady ? (
+                  <>
+                    <Check className="w-6 h-6" /> VOCÊ ESTÁ PRONTO! AGUARDANDO ADVERSÁRIO...
+                  </>
+                ) : (
+                  <>
+                    <Flame className="w-6 h-6" /> ESTOU PRONTO (ESTILO DRAFTER.LOL)
+                  </>
+                )}
+              </button>
+            )}
+
+            {userRole === 'SPECTATOR' && (
+              <div className="text-gray-400 font-mono text-sm py-2">
+                👁️ Você está assistindo como espectador. O draft começará assim que ambos os capitães estiverem prontos.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Main Draft Screen Grid */}
       <div className="flex-1 grid grid-cols-12 gap-4 p-4 max-w-[1920px] mx-auto w-full">

@@ -51,6 +51,7 @@ export interface MatchData {
 
 export type DraftPhase =
   | 'WAITING'
+  | 'READY_CHECK'
   | 'BAN_1'
   | 'PICK_1'
   | 'BAN_2'
@@ -73,6 +74,10 @@ export interface DraftState {
   currentActionType: 'BAN' | 'PICK';
   stepIndex: number;
   timerSecondsRemaining: number;
+  blueReady: boolean;
+  redReady: boolean;
+  blueConnected?: boolean;
+  redConnected?: boolean;
   blueHasExtraTime: boolean;
   redHasExtraTime: boolean;
   blueUsedExtraTime: boolean;

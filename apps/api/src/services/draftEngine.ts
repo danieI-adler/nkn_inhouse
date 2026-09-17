@@ -34,11 +34,15 @@ export class DraftEngine {
 
     const state: DraftState = {
       matchId,
-      phase: 'BAN_1',
+      phase: 'READY_CHECK',
       currentTurn: firstStep.team,
       currentActionType: firstStep.type,
       stepIndex: 0,
       timerSecondsRemaining: 45,
+      blueReady: false,
+      redReady: false,
+      blueConnected: false,
+      redConnected: false,
       blueHasExtraTime: false,
       redHasExtraTime: false,
       blueUsedExtraTime: false,
@@ -63,7 +67,6 @@ export class DraftEngine {
     };
 
     this.rooms.set(matchId, room);
-    this.startTurnTimer(matchId);
     return room;
   }
 
@@ -80,8 +83,13 @@ export class DraftEngine {
       }
 
       let role: 'BLUE_CAPTAIN' | 'RED_CAPTAIN' | 'SPECTATOR' = 'SPECTATOR';
-      if (token === room.blueCaptainToken) role = 'BLUE_CAPTAIN';
-      else if (token === room.redCaptainToken) role = 'RED_CAPTAIN';
+      if (token === room.blueCaptainToken) {
+        role = 'BLUE_CAPTAIN';
+        room.state.blueConnected = true;
+      } else if (token === room.redCaptainToken) {
+        role = 'RED_CAPTAIN';
+        room.state.redConnected = true;
+      }
 
       socket.join(`draft:${matchId}`);
       socket.emit('draft_init', {
@@ -89,15 +97,39 @@ export class DraftEngine {
         userRole: role,
       });
 
-      this.io.to(`draft:${matchId}`).emit('user_joined', { role, totalConnected: this.getConnectedCount(matchId) });
+      this.io.to(`draft:${matchId}`).emit('user_joined', {
+        role,
+        totalConnected: this.getConnectedCount(matchId),
+        state: room.state,
+      });
+    });
+
+    socket.on('captain_ready', ({ matchId, token }) => {
+      const room = this.rooms.get(matchId);
+      if (!room || room.state.phase !== 'READY_CHECK') return;
+
+      if (token === room.blueCaptainToken) {
+        room.state.blueReady = true;
+        room.onActionLogged?.('🔵 Capitão Azul confirmou que está pronto!');
+      } else if (token === room.redCaptainToken) {
+        room.state.redReady = true;
+        room.onActionLogged?.('🔴 Capitão Vermelho confirmou que está pronto!');
+      }
+
+      // Se ambos os capitães estão prontos, inicia o draft!
+      if (room.state.blueReady && room.state.redReady) {
+        room.state.phase = 'BAN_1';
+        room.state.timerSecondsRemaining = 45;
+        this.io.to(`draft:${matchId}`).emit('draft_started', { state: room.state });
+        room.onActionLogged?.('🚀 Ambos os capitães estão prontos! O draft começou.');
+        this.startTurnTimer(matchId);
+      } else {
+        this.io.to(`draft:${matchId}`).emit('ready_status_update', { state: room.state });
+      }
     });
 
     socket.on('submit_action', ({ matchId, token, championId, championName }) => {
       this.processAction(matchId, token, championId, championName);
-    });
-
-    socket.on('request_extra_time', ({ matchId, token }) => {
-      this.grantExtraTime(matchId, token);
     });
 
     socket.on('swap_roles', ({ matchId, token, side, picksWithLanes }) => {

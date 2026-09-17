@@ -230,15 +230,18 @@ export class DatabaseService {
 
     if (this.pool && this.isSupabaseConnected) {
       this.pool.query(
-        `INSERT INTO matches (id, mode, status, room_name, room_password, data, created_at) 
-         VALUES ($1, $2, $3, $4, $5, $6, NOW()) 
-         ON CONFLICT (id) DO UPDATE SET mode = EXCLUDED.mode, status = EXCLUDED.status, room_name = EXCLUDED.room_name, room_password = EXCLUDED.room_password, data = EXCLUDED.data`,
+        `INSERT INTO matches (id, mode, status, room_name, room_password, blue_team, red_team, winner, data, created_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW()) 
+         ON CONFLICT (id) DO UPDATE SET mode = EXCLUDED.mode, status = EXCLUDED.status, room_name = EXCLUDED.room_name, room_password = EXCLUDED.room_password, blue_team = EXCLUDED.blue_team, red_team = EXCLUDED.red_team, winner = EXCLUDED.winner, data = EXCLUDED.data`,
         [
           matchId,
           match.mode || 'RANKED_AUTO',
           match.status,
           match.roomName || `NUKENIN-${matchId.toUpperCase()}`,
           match.roomPassword || 'NKN',
+          JSON.stringify(match.blueTeam || []),
+          JSON.stringify(match.redTeam || []),
+          match.winner || null,
           JSON.stringify(match),
         ]
       ).catch((err) => console.error('[Supabase] Erro ao salvar partida:', err.message));

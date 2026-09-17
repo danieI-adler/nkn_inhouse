@@ -32,6 +32,7 @@ const matchTextChannels = new Map<string, string>();
 export interface QueuedPlayer {
   userId: string;
   tag: string;
+  displayName?: string;
   riotName?: string;
   riotTag?: string;
   lanes: string[];
@@ -596,7 +597,7 @@ async function handleButtonQueue(interaction: ButtonInteraction) {
     }
 
     const lines = generalQueue.map(
-      (p, i) => `${i + 1}. <@${p.userId}> (${p.riotName ? `${p.riotName}#${p.riotTag}` : p.tag}) • Rotas: \`${p.lanes.join(', ')}\``
+      (p, i) => `${i + 1}. <@${p.userId}> (**${p.displayName || p.riotName || p.tag}**) • \`${p.riotName ? `${p.riotName}#${p.riotTag}` : p.tag}\` • Rotas: \`${p.lanes.join(', ')}\``
     );
 
     await interaction.editReply({
@@ -638,10 +639,15 @@ async function handleButtonQueue(interaction: ButtonInteraction) {
         return;
       }
 
+      // Obtém o apelido (displayName) no servidor
+      const guildMember = interaction.guild ? await interaction.guild.members.fetch(userId).catch(() => null) : null;
+      const displayName = guildMember?.displayName || profile?.riotGameName || interaction.user.displayName || interaction.user.tag;
+
       // Adiciona na fila geral
       generalQueue.push({
         userId,
         tag: interaction.user.tag,
+        displayName,
         riotName: profile?.riotGameName,
         riotTag: profile?.riotTagLine,
         lanes: registeredLanes,
@@ -732,9 +738,30 @@ async function createMatchRoom(guild: Guild, playerIds: string[], mode: GameMode
       parent: category.id,
     });
 
-    // Gera link OP.GG Multi-search
-    const blueSummoners = match.blueTeam.map((s: any) => `${s.player.riotGameName}%23${s.player.riotTagLine}`).join(',');
-    const redSummoners = match.redTeam.map((s: any) => `${s.player.riotGameName}%23${s.player.riotTagLine}`).join(',');
+    // Busca os apelidos (display names) do servidor para os jogadores da partida
+    const blueTeamWithNicknames = await Promise.all(
+      match.blueTeam.map(async (s: any) => {
+        const member = await guild.members.fetch(s.player.discordId).catch(() => null);
+        const displayName = member?.displayName || s.player.riotGameName || s.player.discordTag;
+        return { ...s, displayName };
+      })
+    );
+
+    const redTeamWithNicknames = await Promise.all(
+      match.redTeam.map(async (s: any) => {
+        const member = await guild.members.fetch(s.player.discordId).catch(() => null);
+        const displayName = member?.displayName || s.player.riotGameName || s.player.discordTag;
+        return { ...s, displayName };
+      })
+    );
+
+    // Gera link OP.GG Multi-search formatado corretamente sem quebras em espaços
+    const blueSummoners = match.blueTeam
+      .map((s: any) => encodeURIComponent(`${s.player.riotGameName}#${s.player.riotTagLine}`))
+      .join(',');
+    const redSummoners = match.redTeam
+      .map((s: any) => encodeURIComponent(`${s.player.riotGameName}#${s.player.riotTagLine}`))
+      .join(',');
     const blueOpgg = `https://www.op.gg/multisearch/br?summoners=${blueSummoners}`;
     const redOpgg = `https://www.op.gg/multisearch/br?summoners=${redSummoners}`;
 
@@ -748,10 +775,14 @@ async function createMatchRoom(guild: Guild, playerIds: string[], mode: GameMode
       .setDescription(
         `**Sala no LoL**: \`${match.roomName}\` | **Senha**: \`${match.roomPassword}\`\n\n` +
         `**🔵 Time Azul:**\n` +
-        match.blueTeam.map((s: any) => `<@${s.player.discordId}> • \`${s.assignedLane}\` • ${s.player.riotGameName}#${s.player.riotTagLine}`).join('\n') +
+        blueTeamWithNicknames
+          .map((s: any) => `<@${s.player.discordId}> (**${s.displayName}**) • \`${s.assignedLane}\` • ${s.player.riotGameName}#${s.player.riotTagLine}`)
+          .join('\n') +
         `\n📊 [OP.GG Time Azul](${blueOpgg})\n\n` +
         `**🔴 Time Vermelho:**\n` +
-        match.redTeam.map((s: any) => `<@${s.player.discordId}> • \`${s.assignedLane}\` • ${s.player.riotGameName}#${s.player.riotTagLine}`).join('\n') +
+        redTeamWithNicknames
+          .map((s: any) => `<@${s.player.discordId}> (**${s.displayName}**) • \`${s.assignedLane}\` • ${s.player.riotGameName}#${s.player.riotTagLine}`)
+          .join('\n') +
         `\n📊 [OP.GG Time Vermelho](${redOpgg})\n\n` +
         `**Links do Draft:**\n` +
         `🔵 [Entrar como Capitão Azul](${blueCaptainLink})\n` +

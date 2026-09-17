@@ -38,9 +38,9 @@ export class DraftEngine {
       currentTurn: firstStep.team,
       currentActionType: firstStep.type,
       stepIndex: 0,
-      timerSecondsRemaining: 30,
-      blueHasExtraTime: true,
-      redHasExtraTime: true,
+      timerSecondsRemaining: 45,
+      blueHasExtraTime: false,
+      redHasExtraTime: false,
       blueUsedExtraTime: false,
       redUsedExtraTime: false,
       blueBans: [],
@@ -206,20 +206,35 @@ export class DraftEngine {
     room.state.stepIndex++;
 
     if (room.state.stepIndex >= DRAFT_SEQUENCE.length) {
-      // Fim das escolhas e bans -> Fase de organização de rotas (Swap Roles)
+      // Fim das escolhas e bans -> Fase de organização de rotas (Swap Roles) de 30 segundos
       room.state.phase = 'SWAP_ROLES';
-      room.state.isCompleted = true;
+      room.state.timerSecondsRemaining = 30;
+      this.io.to(`draft:${matchId}`).emit('draft_update', { state: room.state });
+      room.onActionLogged?.('🔄 Escolhas finalizadas! Fase de troca de campeões iniciada (30s).');
+
       if (room.timerInterval) clearInterval(room.timerInterval);
 
-      this.io.to(`draft:${matchId}`).emit('draft_completed', { state: room.state });
-      room.onDraftCompleted?.(room.state);
+      room.timerInterval = setInterval(() => {
+        room.state.timerSecondsRemaining--;
+        this.io.to(`draft:${matchId}`).emit('timer_tick', {
+          secondsRemaining: room.state.timerSecondsRemaining,
+        });
+
+        if (room.state.timerSecondsRemaining <= 0) {
+          if (room.timerInterval) clearInterval(room.timerInterval);
+          room.state.isCompleted = true;
+          this.io.to(`draft:${matchId}`).emit('draft_completed', { state: room.state });
+          room.onDraftCompleted?.(room.state);
+        }
+      }, 1000);
+
       return;
     }
 
     const nextStep = DRAFT_SEQUENCE[room.state.stepIndex];
     room.state.currentTurn = nextStep.team;
     room.state.currentActionType = nextStep.type;
-    room.state.timerSecondsRemaining = 30;
+    room.state.timerSecondsRemaining = 45;
 
     // Atualiza nome da fase
     if (room.state.stepIndex < 6) room.state.phase = 'BAN_1';

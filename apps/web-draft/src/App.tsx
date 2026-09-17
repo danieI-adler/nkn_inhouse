@@ -113,7 +113,7 @@ export default function App() {
 
   // Estado do Draft
   const [stepIndex, setStepIndex] = useState(0);
-  const [timer, setTimer] = useState(30);
+  const [timer, setTimer] = useState(45);
   const [isPaused, setIsPaused] = useState(false);
   const [selectedChampion, setSelectedChampion] = useState<ChampionData | null>(null);
 
@@ -135,17 +135,15 @@ export default function App() {
   const [redPlayers, setRedPlayers] = useState<string[]>([
     'NKN Zephyr',
     'NKN Shadow',
-    'NKN Ghost',
     'NKN Blaze',
+    'NKN Ghost',
     'NKN Frost',
   ]);
 
-  // Troca de Rotas (Swap Lanes) no final
+  // Troca de Rotas (Swap Lanes) no final (30 segundos)
   const [swapSourceIndex, setSwapSourceIndex] = useState<{ team: TeamSide; index: number } | null>(null);
-
-  // Prorrogação
-  const [blueHasExtra, setBlueHasExtra] = useState(true);
-  const [redHasExtra, setRedHasExtra] = useState(true);
+  const [swapTimer, setSwapTimer] = useState(30);
+  const [isFullyFinalized, setIsFullyFinalized] = useState(false);
 
   // Modo de controle: 'SOLO_SIMULATOR', 'BLUE_ONLY', 'RED_ONLY'
   const [controlMode, setControlMode] = useState<'SOLO_SIMULATOR' | 'BLUE_ONLY' | 'RED_ONLY'>('SOLO_SIMULATOR');
@@ -255,7 +253,7 @@ export default function App() {
     loadDataDragon();
   }, []);
 
-  // 2. Timer decrescente de 30s
+  // 2. Timer decrescente de 45s para picks e bans
   useEffect(() => {
     if (isCompleted || isPaused) return;
 
@@ -263,7 +261,7 @@ export default function App() {
       setTimer((prev) => {
         if (prev <= 1) {
           handleAutoSelect();
-          return 30;
+          return 45;
         }
         return prev - 1;
       });
@@ -271,6 +269,23 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [stepIndex, isCompleted, isPaused, champions]);
+
+  // 3. Timer decrescente de 30s para a fase de troca de campeões (Swap Phase)
+  useEffect(() => {
+    if (!isCompleted || isFullyFinalized || isPaused) return;
+
+    const interval = setInterval(() => {
+      setSwapTimer((prev) => {
+        if (prev <= 1) {
+          setIsFullyFinalized(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isCompleted, isFullyFinalized, isPaused]);
 
   // Lista de IDs já selecionados ou banidos
   const unavailableIds = useMemo(() => {
@@ -314,7 +329,7 @@ export default function App() {
     }
 
     setSelectedChampion(null);
-    setTimer(30);
+    setTimer(45);
     setStepIndex((prev) => prev + 1);
   };
 
@@ -323,27 +338,16 @@ export default function App() {
     executeAction(selectedChampion);
   };
 
-  const handleExtraTime = () => {
-    if (!currentStep) return;
-    if (currentStep.team === 'BLUE' && blueHasExtra) {
-      setBlueHasExtra(false);
-      setTimer((t) => t + 15);
-    } else if (currentStep.team === 'RED' && redHasExtra) {
-      setRedHasExtra(false);
-      setTimer((t) => t + 15);
-    }
-  };
-
   const handleResetDraft = () => {
     setStepIndex(0);
-    setTimer(30);
+    setTimer(45);
+    setSwapTimer(30);
+    setIsFullyFinalized(false);
     setSelectedChampion(null);
     setBlueBans([]);
     setRedBans([]);
     setBluePicks([]);
     setRedPicks([]);
-    setBlueHasExtra(true);
-    setRedHasExtra(true);
     setIsPaused(false);
     setSwapSourceIndex(null);
   };
@@ -648,8 +652,10 @@ export default function App() {
             <div className="flex items-center gap-6">
               <div
                 className={`text-6xl font-extrabold tabular-nums tracking-tighter font-mono ${
-                  isCompleted
+                  isFullyFinalized
                     ? 'text-emerald-400'
+                    : isCompleted
+                    ? 'text-amber-400 animate-pulse'
                     : timer <= 10
                     ? 'text-red-500 animate-bounce'
                     : currentStep?.team === 'BLUE'
@@ -657,21 +663,8 @@ export default function App() {
                     : 'text-rose-400'
                 }`}
               >
-                {isCompleted ? '✓' : `${timer}s`}
+                {isFullyFinalized ? '✓' : isCompleted ? `${swapTimer}s` : `${timer}s`}
               </div>
-
-              {!isCompleted && (
-                <button
-                  onClick={handleExtraTime}
-                  disabled={
-                    (currentStep?.team === 'BLUE' && !blueHasExtra) ||
-                    (currentStep?.team === 'RED' && !redHasExtra)
-                  }
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600/30 border border-purple-500/40 hover:bg-purple-600/50 disabled:opacity-30 disabled:cursor-not-allowed text-purple-200 text-xs font-semibold transition"
-                >
-                  <Plus className="w-3.5 h-3.5" /> +15s Extra
-                </button>
-              )}
             </div>
 
             <div className="mt-2 text-sm font-semibold flex items-center gap-2">

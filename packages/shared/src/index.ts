@@ -11,6 +11,8 @@ export interface PlayerProfile {
   riotRankDivision: string; // I, II, III, IV
   riotLp: number;
   internalMmr: number;
+  mu?: number; // OpenSkill / TrueSkill skill mean (default ~25 or derived from rank)
+  sigma?: number; // OpenSkill / TrueSkill uncertainty standard deviation (default ~8.333)
   matchesPlayed: number;
   wins: number;
   losses: number;

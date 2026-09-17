@@ -567,10 +567,22 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
+      let summaryText = '';
+      if (Array.isArray(data.results) && data.results.length > 0) {
+        const winners = data.results.filter((r: any) => r.won);
+        const losers = data.results.filter((r: any) => !r.won);
+
+        summaryText = '\n\n**Vitória:**\n' +
+          winners.map((w: any) => `<@${w.discordId}> (**+${w.delta}**) → \`${w.newMmr}\``).join('\n') +
+          '\n\n**Derrota:**\n' +
+          losers.map((l: any) => `<@${l.discordId}> (**${l.delta}**) → \`${l.newMmr}\``).join('\n');
+      }
+
       await interaction.editReply(
-        `🏆 **Partida #${matchId} Concluída!**\nVencedor: **Time ${winner === 'BLUE' ? 'Azul' : 'Vermelho'}**.\n` +
-        `O MMR dos participantes foi recalculado no banco de dados.\n` +
-        `🔄 Movendo jogadores de volta para a sala de espera e agendando limpeza dos canais...`
+        `🏆 **Partida #${matchId} Concluída!**\n` +
+        `Vencedor: **Time ${winner === 'BLUE' ? 'Azul' : 'Vermelho'}**.\n` +
+        summaryText +
+        `\n\n🔄 Movendo jogadores de volta para a sala de espera e agendando limpeza dos canais...`
       );
 
       // Auto-move dos jogadores de volta para a waiting room e limpeza de canais

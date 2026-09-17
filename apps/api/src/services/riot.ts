@@ -1,4 +1,4 @@
-import { calculateSeedMmr } from './mmr';
+import { calculateSeedMmr, calculateSeedMuAndMmr } from './mmr';
 
 export interface RiotAccountDto {
   puuid: string;
@@ -64,14 +64,18 @@ export class RiotService {
     division: string;
     lp: number;
     seedMmr: number;
+    mu: number;
+    sigma: number;
   }> {
     if (!this.apiKey || puuid.startsWith('mock-puuid')) {
-      // Fallback para Unranked (1200 MMR)
+      const { mu, sigma, displayMmr } = calculateSeedMuAndMmr('UNRANKED');
       return {
         tier: 'UNRANKED',
         division: 'IV',
         lp: 0,
-        seedMmr: calculateSeedMmr('UNRANKED'),
+        seedMmr: displayMmr,
+        mu,
+        sigma,
       };
     }
 
@@ -92,20 +96,25 @@ export class RiotService {
     const soloQ = entries.find((e) => e.queueType === 'RANKED_SOLO_5x5');
 
     if (!soloQ) {
+      const { mu, sigma, displayMmr } = calculateSeedMuAndMmr('UNRANKED');
       return {
         tier: 'UNRANKED',
         division: 'IV',
         lp: 0,
-        seedMmr: calculateSeedMmr('UNRANKED'),
+        seedMmr: displayMmr,
+        mu,
+        sigma,
       };
     }
 
-    const seedMmr = calculateSeedMmr(soloQ.tier, soloQ.rank, soloQ.leaguePoints);
+    const { mu, sigma, displayMmr } = calculateSeedMuAndMmr(soloQ.tier, soloQ.rank, soloQ.leaguePoints);
     return {
       tier: soloQ.tier,
       division: soloQ.rank,
       lp: soloQ.leaguePoints,
-      seedMmr,
+      seedMmr: displayMmr,
+      mu,
+      sigma,
     };
   }
 

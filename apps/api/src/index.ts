@@ -12,7 +12,7 @@ import { RiotService } from './services/riot';
 import { balanceTeams } from './services/matchmaker';
 import { DraftEngine } from './services/draftEngine';
 import { generateMatchCard } from './services/cardRenderer';
-import { calculateNewMmr } from './services/mmr';
+import { calculateMatchOpenSkill, DEFAULT_SIGMA, MMR_SCALE } from './services/mmr';
 import { db } from './services/db';
 
 const riotService = new RiotService(process.env.RIOT_API_KEY);
@@ -66,6 +66,8 @@ async function start() {
           riotRankDivision: rankInfo.division,
           riotLp: rankInfo.lp,
           internalMmr: rankInfo.seedMmr,
+          mu: rankInfo.mu,
+          sigma: rankInfo.sigma,
           matchesPlayed: 0,
           wins: 0,
           losses: 0,
@@ -80,6 +82,11 @@ async function start() {
         profile.riotRankDivision = rankInfo.division;
         profile.riotLp = rankInfo.lp;
         profile.topChampions = topChamps;
+        if (profile.matchesPlayed === 0) {
+          profile.internalMmr = rankInfo.seedMmr;
+          profile.mu = rankInfo.mu;
+          profile.sigma = rankInfo.sigma;
+        }
       }
 
       db.setPlayer(discordId, profile);
@@ -302,33 +309,77 @@ async function start() {
 
     const resultsSummary: any[] = [];
 
-    // Atualiza MMR se não for modo zoação
+    // Atualiza MMR usando OpenSkill / Weng-Lin com incerteza sigma dinâmica
     if (match.mode !== 'CASUAL_ARAM_ZOACAO') {
-      for (const slot of match.blueTeam) {
+      const teamAPlayers = match.blueTeam.map((slot) => {
         const p = db.getPlayer(slot.player.discordId);
-        if (p) {
-          const isWinner = winner === 'BLUE';
-          const { newMmr, delta } = calculateNewMmr(p.internalMmr, p.matchesPlayed, isWinner, blueAvg, redAvg);
-          p.internalMmr = newMmr;
-          p.matchesPlayed++;
-          if (isWinner) p.wins++; else p.losses++;
-          db.setPlayer(p.discordId, p);
-          resultsSummary.push({ discordId: p.discordId, newMmr, delta, won: isWinner });
-        }
-      }
+        const mu = p?.mu ?? (p?.internalMmr ? p.internalMmr / MMR_SCALE : 25);
+        const sigma = p?.sigma ?? DEFAULT_SIGMA;
+        return {
+          discordId: slot.player.discordId,
+          mu,
+          sigma,
+          internalMmr: p?.internalMmr,
+          matchesPlayed: p?.matchesPlayed,
+        };
+      });
 
-      for (const slot of match.redTeam) {
+      const teamBPlayers = match.redTeam.map((slot) => {
         const p = db.getPlayer(slot.player.discordId);
+        const mu = p?.mu ?? (p?.internalMmr ? p.internalMmr / MMR_SCALE : 25);
+        const sigma = p?.sigma ?? DEFAULT_SIGMA;
+        return {
+          discordId: slot.player.discordId,
+          mu,
+          sigma,
+          internalMmr: p?.internalMmr,
+          matchesPlayed: p?.matchesPlayed,
+        };
+      });
+
+      const openSkillResults = calculateMatchOpenSkill(teamAPlayers, teamBPlayers, winner === 'BLUE');
+
+      // Aplica atualização ao Time Azul
+      openSkillResults.teamAUpdates.forEach((upd: any, idx: number) => {
+        const pid = teamAPlayers[idx].discordId;
+        const p = db.getPlayer(pid);
         if (p) {
-          const isWinner = winner === 'RED';
-          const { newMmr, delta } = calculateNewMmr(p.internalMmr, p.matchesPlayed, isWinner, redAvg, blueAvg);
-          p.internalMmr = newMmr;
+          p.mu = upd.newMu;
+          p.sigma = upd.newSigma;
+          p.internalMmr = upd.newMmr;
           p.matchesPlayed++;
-          if (isWinner) p.wins++; else p.losses++;
+          if (winner === 'BLUE') p.wins++; else p.losses++;
           db.setPlayer(p.discordId, p);
-          resultsSummary.push({ discordId: p.discordId, newMmr, delta, won: isWinner });
+          resultsSummary.push({
+            discordId: p.discordId,
+            riotGameName: p.riotGameName,
+            newMmr: upd.newMmr,
+            delta: upd.delta,
+            won: winner === 'BLUE',
+          });
         }
-      }
+      });
+
+      // Aplica atualização ao Time Vermelho
+      openSkillResults.teamBUpdates.forEach((upd: any, idx: number) => {
+        const pid = teamBPlayers[idx].discordId;
+        const p = db.getPlayer(pid);
+        if (p) {
+          p.mu = upd.newMu;
+          p.sigma = upd.newSigma;
+          p.internalMmr = upd.newMmr;
+          p.matchesPlayed++;
+          if (winner === 'RED') p.wins++; else p.losses++;
+          db.setPlayer(p.discordId, p);
+          resultsSummary.push({
+            discordId: p.discordId,
+            riotGameName: p.riotGameName,
+            newMmr: upd.newMmr,
+            delta: upd.delta,
+            won: winner === 'RED',
+          });
+        }
+      });
     }
 
     return reply.send({ success: true, winner, results: resultsSummary });

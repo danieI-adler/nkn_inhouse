@@ -267,9 +267,28 @@ async function start() {
     Body: { matchId: string; winner: 'BLUE' | 'RED' };
   }>('/api/matches/report', async (request, reply) => {
     const { matchId, winner } = request.body;
-    const match = db.getMatch(matchId);
-    if (!match || match.status === 'FINISHED') {
-      return reply.status(400).send({ message: 'Partida inválida ou já finalizada.' });
+    const cleanId = (matchId || '').trim().replace(/^#/, '').toLowerCase();
+    let match = db.getMatch(matchId) || db.getMatch(cleanId) || db.getMatch(`nkn-${cleanId}`);
+
+    if (!match) {
+      // Procura por id ignorando case
+      const all = (db as any).matches;
+      if (all) {
+        for (const [id, m] of all.entries()) {
+          if (id.toLowerCase() === cleanId || id.toLowerCase().includes(cleanId)) {
+            match = m;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!match) {
+      return reply.status(400).send({ message: `Partida #${matchId} não encontrada.` });
+    }
+
+    if (match.status === 'FINISHED') {
+      return reply.status(400).send({ message: `A partida #${matchId} já foi finalizada anteriormente.` });
     }
 
     match.status = 'FINISHED';

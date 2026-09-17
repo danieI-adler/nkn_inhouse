@@ -335,6 +335,23 @@ async function start() {
   const PORT = Number(process.env.PORT) || 3001;
   await server.listen({ port: PORT, host: '0.0.0.0' });
   console.log(`🚀 API Nukenin Inhouse rodando na porta ${PORT}`);
+
+  // Auto-ping para manter o Render free tier acordado (a cada 5 minutos)
+  const RENDER_URL = process.env.RENDER_EXTERNAL_URL || process.env.API_PUBLIC_URL;
+  if (RENDER_URL) {
+    const pingUrl = RENDER_URL.replace(/\/+$/, '') + '/';
+    setInterval(async () => {
+      try {
+        await fetch(pingUrl);
+        console.log(`🏓 Keep-alive ping enviado para ${pingUrl}`);
+      } catch (e) {
+        console.warn('⚠️ Falha no keep-alive ping:', (e as Error).message);
+      }
+    }, 5 * 60 * 1000); // 5 minutos
+    console.log(`🏓 Keep-alive configurado: ping a cada 5min em ${pingUrl}`);
+  } else {
+    console.log('ℹ️ RENDER_EXTERNAL_URL não definida, keep-alive desativado (apenas em produção).');
+  }
 }
 
 start().catch((err) => {

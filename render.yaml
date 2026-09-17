@@ -23,3 +23,5 @@ services:
         value: http://localhost:10000
       - key: WEB_DRAFT_URL
         value: https://daniei-adler.github.io/nkn_inhouse
+      - key: RENDER_EXTERNAL_URL
+        value: https://nkn-inhouse-service.onrender.com

@@ -155,10 +155,28 @@ export default function App() {
 
   // Sincronização via Socket.io com o Backend da Inhouse (jogadores reais do Discord)
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const pathParts = window.location.pathname.split('/');
-    const matchId = pathParts[2] || urlParams.get('matchId') || '';
+    // Suporta query params diretos (?matchId=...&token=...), hash (#/draft/matchId?token=...) ou path (/draft/matchId)
+    const hash = window.location.hash || '';
+    const hashSearch = hash.includes('?') ? hash.substring(hash.indexOf('?')) : '';
+    const urlParams = new URLSearchParams(window.location.search || hashSearch);
+
+    let matchId = urlParams.get('matchId') || '';
     const token = urlParams.get('token') || '';
+
+    if (!matchId) {
+      // Tenta extrair do hash: #/draft/nkn-1234
+      const hashMatch = hash.match(/\/draft\/([^/?#]+)/);
+      if (hashMatch) {
+        matchId = hashMatch[1];
+      } else {
+        // Tenta extrair do path
+        const pathParts = window.location.pathname.split('/');
+        const draftIdx = pathParts.indexOf('draft');
+        if (draftIdx !== -1 && pathParts[draftIdx + 1]) {
+          matchId = pathParts[draftIdx + 1];
+        }
+      }
+    }
 
     if (!matchId) return;
 

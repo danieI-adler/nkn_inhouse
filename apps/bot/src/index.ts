@@ -673,10 +673,10 @@ async function createMatchRoom(guild: Guild, playerIds: string[], mode: GameMode
     const blueOpgg = `https://www.op.gg/multisearch/br?summoners=${blueSummoners}`;
     const redOpgg = `https://www.op.gg/multisearch/br?summoners=${redSummoners}`;
 
-    const draftBase = process.env.WEB_DRAFT_URL || 'http://localhost:5173';
-    const blueCaptainLink = `${draftBase}/draft/${matchId}?token=${match.blueCaptainToken}`;
-    const redCaptainLink = `${draftBase}/draft/${matchId}?token=${match.redCaptainToken}`;
-    const spectatorLink = `${draftBase}/draft/${matchId}?token=${match.spectatorToken}`;
+    const draftBase = (process.env.WEB_DRAFT_URL || 'http://localhost:5173').replace(/\/+$/, '');
+    const blueCaptainLink = `${draftBase}/#/draft/${matchId}?token=${match.blueCaptainToken}`;
+    const redCaptainLink = `${draftBase}/#/draft/${matchId}?token=${match.redCaptainToken}`;
+    const spectatorLink = `${draftBase}/#/draft/${matchId}?token=${match.spectatorToken}`;
 
     const embed = new EmbedBuilder()
       .setTitle(`⚔️ Partida Formada - #${matchId.toUpperCase()}`)

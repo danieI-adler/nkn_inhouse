@@ -34,7 +34,9 @@ jobs:
         run: npm run build --workspace=@nkn/shared
 
       - name: Build Web Draft app
-        run: npm run build --workspace=@nkn/web-draft
+        run: |
+          npm run build --workspace=@nkn/web-draft
+          cp ./apps/web-draft/dist/index.html ./apps/web-draft/dist/404.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

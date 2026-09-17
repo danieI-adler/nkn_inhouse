@@ -73,8 +73,61 @@ export const client = new Client({
   partials: [Partials.Channel, Partials.Message],
 });
 
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`🥷 Nukenin Inhouse Bot online como ${client.user?.tag}`);
+
+  // Auto-deploy dos slash commands no startup
+  try {
+    const { REST, Routes, SlashCommandBuilder } = await import('discord.js');
+    const token = process.env.DISCORD_BOT_TOKEN;
+    const clientId = process.env.CLIENT_ID;
+    const guildId = process.env.GUILD_ID;
+    if (token && clientId && guildId) {
+      const cmds = [
+        new SlashCommandBuilder().setName('vincular').setDescription('Vincula sua conta da Riot Games ao sistema Inhouse')
+          .addStringOption(o => o.setName('riot_id').setDescription('Riot ID no formato Nome#Tag').setRequired(true)),
+        new SlashCommandBuilder().setName('rotas').setDescription('Configura suas preferências de rota')
+          .addStringOption(o => o.setName('rotas').setDescription('Ex: TOP, MID ou FILL').setRequired(true)),
+        new SlashCommandBuilder().setName('painel-fila').setDescription('Envia o painel interativo de matchmaking'),
+        new SlashCommandBuilder().setName('resultado').setDescription('Registra o vencedor de uma partida')
+          .addStringOption(o => o.setName('partida_id').setDescription('ID da partida (ex: nkn-1234)').setRequired(true))
+          .addStringOption(o => o.setName('vencedor').setDescription('Time vencedor').setRequired(true)
+            .addChoices({ name: 'Time Azul', value: 'BLUE' }, { name: 'Time Vermelho', value: 'RED' })),
+        new SlashCommandBuilder().setName('ranking').setDescription('Exibe a Leaderboard da comunidade Nukenin'),
+        new SlashCommandBuilder().setName('set-waiting-room').setDescription('Define o canal de voz geral de espera')
+          .addChannelOption(o => o.setName('canal_voz').setDescription('Canal de voz geral').setRequired(true)),
+        new SlashCommandBuilder().setName('perfil').setDescription('Exibe o perfil inhouse de um jogador')
+          .addUserOption(o => o.setName('usuario').setDescription('Membro do Discord').setRequired(false)),
+        new SlashCommandBuilder().setName('setup-fila').setDescription('Cria a mensagem permanente da Fila NKN')
+          .addChannelOption(o => o.setName('canal').setDescription('Canal de texto').setRequired(false))
+          .addStringOption(o => o.setName('modo').setDescription('Modo de jogo').setRequired(false)
+            .addChoices(
+              { name: 'Ranked Competitiva (Auto MMR)', value: 'RANKED_AUTO' },
+              { name: 'Capitães (Draft com Capitães)', value: 'RANKED_CAPTAIN' },
+              { name: 'ARAM / Zoação (Casual)', value: 'CASUAL_ARAM_ZOACAO' })),
+        new SlashCommandBuilder().setName('set-modo').setDescription('Altera o modo de jogo da fila')
+          .addStringOption(o => o.setName('modo').setDescription('Modo de jogo').setRequired(true)
+            .addChoices(
+              { name: 'Ranked Competitiva (Auto MMR)', value: 'RANKED_AUTO' },
+              { name: 'Capitães (Draft com Capitães)', value: 'RANKED_CAPTAIN' },
+              { name: 'ARAM / Zoação (Casual)', value: 'CASUAL_ARAM_ZOACAO' })),
+        new SlashCommandBuilder().setName('cancelar-partida').setDescription('Cancela uma partida em andamento')
+          .addStringOption(o => o.setName('partida_id').setDescription('ID da partida (ex: nkn-5501)').setRequired(true)),
+        new SlashCommandBuilder().setName('test-partida').setDescription('Cria uma partida de teste'),
+      ].map(cmd => cmd.toJSON());
+
+      const rest = new REST({ version: '10' }).setToken(token);
+      await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: cmds });
+      console.log('✅ Slash Commands registrados automaticamente no startup!');
+    }
+  } catch (cmdErr) {
+    console.error('⚠️ Falha ao registrar slash commands no startup:', cmdErr);
+  }
+
+  // Heartbeat a cada 2 minutos para confirmar que o bot está vivo
+  setInterval(() => {
+    console.log(`💓 [Heartbeat] Bot vivo | Guilds: ${client.guilds.cache.size} | Ping: ${client.ws.ping}ms | ${new Date().toISOString()}`);
+  }, 2 * 60 * 1000);
 
   // Recupera configurações de fila permanente e modo salvas
   (async () => {

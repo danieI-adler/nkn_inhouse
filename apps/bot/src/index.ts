@@ -176,6 +176,7 @@ client.once('ready', () => {
 
 // Comandos e Interações de Fila
 client.on('interactionCreate', async (interaction) => {
+  try {
   console.log(`[Discord Bot] Interação recebida: tipo=${interaction.type}, usuario=${interaction.user.tag}`);
   if (interaction.isButton()) {
     console.log(`[Discord Bot] Botão clicado: ${interaction.customId}`);
@@ -420,6 +421,7 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   if (commandName === 'perfil') {
+    console.log('[Discord Bot] /perfil invoked for user', interaction.user.id);
     const targetUser = interaction.options.getUser('usuario') || interaction.user;
     await interaction.deferReply();
 
@@ -529,6 +531,7 @@ client.on('interactionCreate', async (interaction) => {
 
   if (commandName === 'cancelar-partida') {
     const matchId = interaction.options.getString('partida_id', true);
+    console.log('[Discord Bot] /cancelar-partida invoked, matchId=', matchId);
     await interaction.deferReply({ ephemeral: true });
 
     try {
@@ -537,8 +540,10 @@ client.on('interactionCreate', async (interaction) => {
         await updatePermanentQueueMessage(interaction.guild);
         await cleanupMatchChannelsAndReturnPlayers(interaction.guild, matchId, true);
       }
+      console.log('[Discord Bot] /cancelar-partida cleanup completed for', matchId);
       await interaction.editReply(`🛑 Partida **#${matchId.toUpperCase()}** cancelada com sucesso! As salas foram excluídas imediatamente.`).catch(() => null);
     } catch (err: any) {
+      console.error('[Discord Bot] Error in /cancelar-partida:', err);
       await interaction.editReply(`❌ Erro ao cancelar partida: ${err.message}`).catch(() => null);
     }
   }
@@ -584,8 +589,22 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.editReply(`❌ Erro ao disparar partida de teste: ${err.message}`);
     }
   }
+  } catch (outerErr: any) {
+    console.error('[Discord Bot] ❌ Erro FATAL no interactionCreate handler:', outerErr);
+    try {
+      if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: '❌ Ocorreu um erro inesperado ao processar este comando.', ephemeral: true });
+      } else if (interaction.isRepliable() && interaction.deferred) {
+        await interaction.editReply('❌ Ocorreu um erro inesperado ao processar este comando.').catch(() => null);
+      }
+    } catch (_) { /* ignore */ }
+  }
 });
 
+// Captura erros do client do Discord
+client.on('error', (err) => {
+  console.error('[Discord Bot] ❌ Client error:', err);
+});
 async function handleButtonQueue(interaction: ButtonInteraction) {
   const userId = interaction.user.id;
   const customId = interaction.customId;

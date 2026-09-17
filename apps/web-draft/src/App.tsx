@@ -233,10 +233,10 @@ export default function App() {
       }
 
       if (state.blueSlots && state.blueSlots.length === 5) {
-        setBluePlayers(state.blueSlots.map((s: any) => s.discordTag || s.riotId));
+        setBluePlayers(state.blueSlots.map((s: any) => s.riotGameName || (s.riotId ? s.riotId.split('#')[0] : '') || s.discordTag || 'Jogador'));
       }
       if (state.redSlots && state.redSlots.length === 5) {
-        setRedPlayers(state.redSlots.map((s: any) => s.discordTag || s.riotId));
+        setRedPlayers(state.redSlots.map((s: any) => s.riotGameName || (s.riotId ? s.riotId.split('#')[0] : '') || s.discordTag || 'Jogador'));
       }
 
       if (Array.isArray(state.blueBans)) {

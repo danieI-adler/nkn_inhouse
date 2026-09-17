@@ -195,12 +195,14 @@ async function start() {
     const blueSlots = match.blueTeam.map((s) => ({
       discordTag: s.player.discordTag,
       riotId: `${s.player.riotGameName}#${s.player.riotTagLine}`,
+      riotGameName: s.player.riotGameName,
       lane: s.assignedLane,
     }));
 
     const redSlots = match.redTeam.map((s) => ({
       discordTag: s.player.discordTag,
       riotId: `${s.player.riotGameName}#${s.player.riotTagLine}`,
+      riotGameName: s.player.riotGameName,
       lane: s.assignedLane,
     }));
 

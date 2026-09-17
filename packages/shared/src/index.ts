@@ -84,8 +84,8 @@ export interface DraftState {
   redUsedExtraTime: boolean;
   blueBans: string[];
   redBans: string[];
-  blueSlots?: { discordTag: string; riotId: string; lane: Lane }[];
-  redSlots?: { discordTag: string; riotId: string; lane: Lane }[];
+  blueSlots?: { discordTag: string; riotId: string; riotGameName?: string; lane: Lane }[];
+  redSlots?: { discordTag: string; riotId: string; riotGameName?: string; lane: Lane }[];
   bluePicks: { championId: string; championName: string; lane?: Lane; playerPuuid?: string }[];
   redPicks: { championId: string; championName: string; lane?: Lane; playerPuuid?: string }[];
   isCompleted: boolean;

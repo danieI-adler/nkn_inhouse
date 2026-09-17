@@ -25,8 +25,8 @@ export class DraftEngine {
     blueToken: string,
     redToken: string,
     specToken: string,
-    blueSlots?: { discordTag: string; riotId: string; lane: Lane }[],
-    redSlots?: { discordTag: string; riotId: string; lane: Lane }[],
+    blueSlots?: { discordTag: string; riotId: string; riotGameName?: string; lane: Lane }[],
+    redSlots?: { discordTag: string; riotId: string; riotGameName?: string; lane: Lane }[],
     onDraftCompleted?: (state: DraftState) => void,
     onActionLogged?: (msg: string) => void
   ): DraftRoom {

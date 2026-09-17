@@ -698,17 +698,24 @@ async function createMatchRoom(guild: Guild, playerIds: string[], mode: GameMode
       type: ChannelType.GuildCategory,
     });
 
+    const uniquePlayerIds = Array.from(new Set(playerIds));
+    const permissionOverwrites: any[] = [
+      { id: everyoneRole.id, deny: [PermissionFlagsBits.ViewChannel] },
+    ];
+
+    for (const pid of uniquePlayerIds) {
+      permissionOverwrites.push({
+        id: pid,
+        type: 1, // 1 = Member (OverwriteType.Member)
+        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+      });
+    }
+
     const textChannel = await guild.channels.create({
       name: `〔💬〕lobby-${matchId}`,
       type: ChannelType.GuildText,
       parent: category.id,
-      permissionOverwrites: [
-        { id: everyoneRole.id, deny: [PermissionFlagsBits.ViewChannel] },
-        ...playerIds.map((id) => ({
-          id,
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
-        })),
-      ],
+      permissionOverwrites,
     });
 
     matchTextChannels.set(matchId, textChannel.id);

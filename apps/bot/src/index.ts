@@ -509,6 +509,64 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.editReply(`❌ Falha: ${err.message}`);
     }
   }
+
+  if (commandName === 'cancelar-partida') {
+    const matchId = interaction.options.getString('partida_id', true);
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      if (activeMatchesCount > 0) activeMatchesCount--;
+      if (interaction.guild) {
+        await updatePermanentQueueMessage(interaction.guild);
+        await cleanupMatchChannelsAndReturnPlayers(interaction.guild, matchId);
+      }
+      await interaction.editReply(`🛑 Partida **#${matchId.toUpperCase()}** cancelada com sucesso! As salas estão sendo excluídas e os jogadores retornados.`);
+    } catch (err: any) {
+      await interaction.editReply(`❌ Erro ao cancelar partida: ${err.message}`);
+    }
+  }
+
+  if (commandName === 'test-partida') {
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      // Busca os jogadores vinculados do banco para simular a partida
+      const lRes = await fetch(`${API_BASE_URL}/api/leaderboard`);
+      const lData = await lRes.json();
+      const players = lData.leaderboard || [];
+
+      if (players.length < 1) {
+        await interaction.editReply('❌ Nenhum jogador vinculado encontrado no banco para teste.');
+        return;
+      }
+
+      // Preenche os 10 slots com os jogadores disponíveis (garantindo que o chamador faça parte)
+      const callerId = interaction.user.id;
+      const testPlayerIds: string[] = [callerId];
+
+      for (const p of players) {
+        if (testPlayerIds.length >= 10) break;
+        if (!testPlayerIds.includes(p.discordId)) {
+          testPlayerIds.push(p.discordId);
+        }
+      }
+
+      // Se ainda faltar jogadores para 10, preenche com duplicatas controladas para a API aceitar
+      let mockIdx = 1;
+      while (testPlayerIds.length < 10) {
+        const fallbackId = players[mockIdx % players.length]?.discordId || callerId;
+        testPlayerIds.push(fallbackId);
+        mockIdx++;
+      }
+
+      if (interaction.guild) {
+        await createMatchRoom(interaction.guild, testPlayerIds, currentQueueMode);
+        await interaction.editReply(`🎮 **Partida de Teste Criada!** Confira a nova categoria e canais criados no servidor.`);
+      }
+    } catch (err: any) {
+      await interaction.editReply(`❌ Erro ao disparar partida de teste: ${err.message}`);
+    }
+  }
 });
 
 async function handleButtonQueue(interaction: ButtonInteraction) {

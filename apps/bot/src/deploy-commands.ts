@@ -117,6 +117,20 @@ const commands = [
           { name: 'ARAM / Zoação (Casual)', value: 'CASUAL_ARAM_ZOACAO' }
         )
     ),
+
+  new SlashCommandBuilder()
+    .setName('cancelar-partida')
+    .setDescription('Cancela e exclui uma partida em andamento sem alterar MMR')
+    .addStringOption((option) =>
+      option
+        .setName('partida_id')
+        .setDescription('ID da partida (ex: nkn-5501)')
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('test-partida')
+    .setDescription('Cria uma partida de teste imediatamente usando jogadores vinculados no banco de dados'),
 ].map((cmd) => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(token);

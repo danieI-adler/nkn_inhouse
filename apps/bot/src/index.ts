@@ -46,6 +46,22 @@ let permanentQueueMessageId: string | null = null;
 let cachedBannerAttachmentUrl: string | null = null;
 let activeMatchesCount = 0;
 
+// Tratamento global de erros para impedir que exceções do Discord derrubem o processo
+process.on('unhandledRejection', (reason: any) => {
+  if (reason?.code === 10008 || reason?.message?.includes('Unknown Message')) {
+    // Interação/mensagem já foi excluída pelo Discord, ignore silenciosamente
+    return;
+  }
+  console.error('⚠️ [Discord Bot] Unhandled Rejection:', reason);
+});
+
+process.on('uncaughtException', (err: any) => {
+  if (err?.code === 10008 || err?.message?.includes('Unknown Message')) {
+    return;
+  }
+  console.error('❌ [Discord Bot] Uncaught Exception:', err);
+});
+
 export const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -521,9 +537,9 @@ client.on('interactionCreate', async (interaction) => {
         await updatePermanentQueueMessage(interaction.guild);
         await cleanupMatchChannelsAndReturnPlayers(interaction.guild, matchId, true);
       }
-      await interaction.editReply(`🛑 Partida **#${matchId.toUpperCase()}** cancelada com sucesso! As salas foram excluídas imediatamente.`);
+      await interaction.editReply(`🛑 Partida **#${matchId.toUpperCase()}** cancelada com sucesso! As salas foram excluídas imediatamente.`).catch(() => null);
     } catch (err: any) {
-      await interaction.editReply(`❌ Erro ao cancelar partida: ${err.message}`);
+      await interaction.editReply(`❌ Erro ao cancelar partida: ${err.message}`).catch(() => null);
     }
   }
 
@@ -892,7 +908,8 @@ async function cleanupMatchChannelsAndReturnPlayers(guild: Guild, matchId: strin
     };
 
     if (immediate) {
-      await deleteChannels();
+      // Agenda para 3 segundos no modo imediato, garantindo que respostas de interação (editReply) terminem antes de excluir o canal
+      setTimeout(deleteChannels, 3000);
     } else {
       // 4. Agenda a exclusão das salas temporárias em 2 minutos após vitória/derrota para ver o placar
       setTimeout(deleteChannels, 120000);

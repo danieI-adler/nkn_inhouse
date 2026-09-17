@@ -518,9 +518,9 @@ client.on('interactionCreate', async (interaction) => {
       if (activeMatchesCount > 0) activeMatchesCount--;
       if (interaction.guild) {
         await updatePermanentQueueMessage(interaction.guild);
-        await cleanupMatchChannelsAndReturnPlayers(interaction.guild, matchId);
+        await cleanupMatchChannelsAndReturnPlayers(interaction.guild, matchId, true);
       }
-      await interaction.editReply(`🛑 Partida **#${matchId.toUpperCase()}** cancelada com sucesso! As salas estão sendo excluídas e os jogadores retornados.`);
+      await interaction.editReply(`🛑 Partida **#${matchId.toUpperCase()}** cancelada com sucesso! As salas foram excluídas imediatamente.`);
     } catch (err: any) {
       await interaction.editReply(`❌ Erro ao cancelar partida: ${err.message}`);
     }
@@ -810,7 +810,7 @@ async function syncLaneRoles(guild: Guild, memberId: string, lanes: Lane[]) {
 }
 
 // Limpa canais e retorna jogadores para a sala de espera após o término da partida
-async function cleanupMatchChannelsAndReturnPlayers(guild: Guild, matchId: string) {
+async function cleanupMatchChannelsAndReturnPlayers(guild: Guild, matchId: string, immediate = false) {
   try {
     const cleanMatchId = matchId.replace(/^#/, '');
 
@@ -842,22 +842,30 @@ async function cleanupMatchChannelsAndReturnPlayers(guild: Guild, matchId: strin
       }
     }
 
-    // 4. Agenda a exclusão das salas temporárias (texto, voz e categoria) em 2 minutos para dar tempo de ver o placar
-    setTimeout(async () => {
+    const deleteChannels = async () => {
       try {
-        const channelsToDelete = guild.channels.cache.filter(
-          (c) =>
-            c.name.toLowerCase().includes(cleanMatchId.toLowerCase()) ||
-            c.name.toLowerCase().includes(matchId.toLowerCase())
-        );
-
-        for (const [_, channel] of channelsToDelete) {
-          await channel.delete().catch(() => null);
+        // Busca os canais direto da API para evitar cache desatualizado
+        const channels = await guild.channels.fetch();
+        for (const [_, channel] of channels) {
+          if (
+            channel &&
+            (channel.name.toLowerCase().includes(cleanMatchId.toLowerCase()) ||
+              channel.name.toLowerCase().includes(matchId.toLowerCase()))
+          ) {
+            await channel.delete().catch(() => null);
+          }
         }
       } catch (err) {
         console.error('Erro ao deletar canais da partida:', err);
       }
-    }, 120000); // 2 minutos
+    };
+
+    if (immediate) {
+      await deleteChannels();
+    } else {
+      // 4. Agenda a exclusão das salas temporárias em 2 minutos após vitória/derrota para ver o placar
+      setTimeout(deleteChannels, 120000);
+    }
   } catch (err) {
     console.error('Erro no cleanupMatchChannelsAndReturnPlayers:', err);
   }

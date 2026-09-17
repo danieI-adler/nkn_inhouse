@@ -230,10 +230,10 @@ export class DatabaseService {
 
     if (this.pool && this.isSupabaseConnected) {
       this.pool.query(
-        `INSERT INTO matches (id, status, data, created_at) 
-         VALUES ($1, $2, $3, NOW()) 
-         ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, data = EXCLUDED.data`,
-        [matchId, match.status, JSON.stringify(match)]
+        `INSERT INTO matches (id, mode, status, data, created_at) 
+         VALUES ($1, $2, $3, $4, NOW()) 
+         ON CONFLICT (id) DO UPDATE SET mode = EXCLUDED.mode, status = EXCLUDED.status, data = EXCLUDED.data`,
+        [matchId, match.mode || 'RANKED_AUTO', match.status, JSON.stringify(match)]
       ).catch((err) => console.error('[Supabase] Erro ao salvar partida:', err.message));
     }
   }

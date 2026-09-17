@@ -110,10 +110,20 @@ export class DatabaseService {
       // Se temos jogadores locais que ainda não estão no Postgres, subir
       for (const p of this.players.values()) {
         await this.pool.query(
-          `INSERT INTO players (id, discord_id, data, updated_at) 
-           VALUES ($1, $2, $3, NOW()) 
-           ON CONFLICT (discord_id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
-          [p.discordId, p.discordId, JSON.stringify(p)]
+          `INSERT INTO players (id, discord_id, discord_tag, riot_game_name, riot_tag_line, puuid, riot_rank_tier, riot_rank_division, riot_lp, internal_mmr, matches_played, wins, losses, registered_lanes, data, updated_at) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW()) 
+           ON CONFLICT (discord_id) DO UPDATE SET 
+             discord_tag = EXCLUDED.discord_tag, riot_game_name = EXCLUDED.riot_game_name, riot_tag_line = EXCLUDED.riot_tag_line, 
+             puuid = EXCLUDED.puuid, riot_rank_tier = EXCLUDED.riot_rank_tier, riot_rank_division = EXCLUDED.riot_rank_division, 
+             riot_lp = EXCLUDED.riot_lp, internal_mmr = EXCLUDED.internal_mmr, matches_played = EXCLUDED.matches_played, 
+             wins = EXCLUDED.wins, losses = EXCLUDED.losses, registered_lanes = EXCLUDED.registered_lanes, 
+             data = EXCLUDED.data, updated_at = NOW()`,
+          [
+            p.discordId, p.discordId, p.discordTag || null, p.riotGameName || null, p.riotTagLine || null,
+            p.puuid || null, p.riotRankTier || null, p.riotRankDivision || null, p.riotLp || 0,
+            p.internalMmr || 1200, p.matchesPlayed || 0, p.wins || 0, p.losses || 0,
+            p.registeredLanes || ['FILL'], JSON.stringify(p),
+          ]
         );
       }
 
@@ -205,10 +215,31 @@ export class DatabaseService {
 
     if (this.pool && this.isSupabaseConnected) {
       this.pool.query(
-        `INSERT INTO players (id, discord_id, data, updated_at) 
-         VALUES ($1, $2, $3, NOW()) 
-         ON CONFLICT (discord_id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
-        [discordId, discordId, JSON.stringify(profile)]
+        `INSERT INTO players (id, discord_id, discord_tag, riot_game_name, riot_tag_line, puuid, riot_rank_tier, riot_rank_division, riot_lp, internal_mmr, matches_played, wins, losses, registered_lanes, data, updated_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW()) 
+         ON CONFLICT (discord_id) DO UPDATE SET 
+           discord_tag = EXCLUDED.discord_tag, riot_game_name = EXCLUDED.riot_game_name, riot_tag_line = EXCLUDED.riot_tag_line, 
+           puuid = EXCLUDED.puuid, riot_rank_tier = EXCLUDED.riot_rank_tier, riot_rank_division = EXCLUDED.riot_rank_division, 
+           riot_lp = EXCLUDED.riot_lp, internal_mmr = EXCLUDED.internal_mmr, matches_played = EXCLUDED.matches_played, 
+           wins = EXCLUDED.wins, losses = EXCLUDED.losses, registered_lanes = EXCLUDED.registered_lanes, 
+           data = EXCLUDED.data, updated_at = NOW()`,
+        [
+          discordId,
+          discordId,
+          profile.discordTag || null,
+          profile.riotGameName || null,
+          profile.riotTagLine || null,
+          profile.puuid || null,
+          profile.riotRankTier || null,
+          profile.riotRankDivision || null,
+          profile.riotLp || 0,
+          profile.internalMmr || 1200,
+          profile.matchesPlayed || 0,
+          profile.wins || 0,
+          profile.losses || 0,
+          profile.registeredLanes || ['FILL'],
+          JSON.stringify(profile),
+        ]
       )
       .then(() => console.log(`[Supabase] Jogador ${profile.riotGameName || discordId} salvo com sucesso na nuvem!`))
       .catch((err) => console.error('[Supabase] Erro ao salvar jogador:', err.message));

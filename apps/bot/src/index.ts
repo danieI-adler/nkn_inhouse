@@ -490,21 +490,23 @@ async function handleButtonQueue(interaction: ButtonInteraction) {
 
   // 1. Botão Sair da Fila
   if (customId === 'queue_leave') {
+    await interaction.deferReply({ ephemeral: true });
     const idx = generalQueue.findIndex((p) => p.userId === userId);
     if (idx !== -1) {
       generalQueue.splice(idx, 1);
-      await interaction.reply({ content: '🚪 Você saiu da fila.', ephemeral: true });
+      await interaction.editReply({ content: '🚪 Você saiu da fila.' });
       await updatePermanentQueueMessage(interaction.guild!);
     } else {
-      await interaction.reply({ content: '⚠️ Você não está na fila.', ephemeral: true });
+      await interaction.editReply({ content: '⚠️ Você não está na fila.' });
     }
     return;
   }
 
   // 2. Botão Lista de Jogadores na Fila
   if (customId === 'queue_players') {
+    await interaction.deferReply({ ephemeral: true });
     if (generalQueue.length === 0) {
-      await interaction.reply({ content: '📊 A fila está vazia no momento.', ephemeral: true });
+      await interaction.editReply({ content: '📊 A fila está vazia no momento.' });
       return;
     }
 
@@ -512,22 +514,21 @@ async function handleButtonQueue(interaction: ButtonInteraction) {
       (p, i) => `${i + 1}. <@${p.userId}> (${p.riotName ? `${p.riotName}#${p.riotTag}` : p.tag}) • Rotas: \`${p.lanes.join(', ')}\``
     );
 
-    await interaction.reply({
+    await interaction.editReply({
       content: `👥 **Jogadores na Fila (${generalQueue.length}/10):**\n${lines.join('\n')}`,
-      ephemeral: true,
     });
     return;
   }
 
   // 3. Botão Entrar na Fila
   if (customId === 'queue_enter') {
+    await interaction.deferReply({ ephemeral: true });
     try {
       // Verifica se o jogador tem conta vinculada
       const profileRes = await fetch(`${API_BASE_URL}/api/players/${userId}`);
       if (!profileRes.ok) {
-        await interaction.reply({
+        await interaction.editReply({
           content: '❌ Você precisa vincular seu Riot ID antes de entrar na fila! Use `/vincular`.',
-          ephemeral: true,
         });
         return;
       }
@@ -538,18 +539,16 @@ async function handleButtonQueue(interaction: ButtonInteraction) {
       // Verifica se tem rotas definidas
       const registeredLanes: string[] = profile?.registeredLanes || [];
       if (registeredLanes.length === 0) {
-        await interaction.reply({
+        await interaction.editReply({
           content: '⚠️ Você precisa definir suas preferências de rotas antes de entrar na fila! Use `/rotas` (Ex: `/rotas rotas:TOP, MID`).',
-          ephemeral: true,
         });
         return;
       }
 
       // Verifica se já está na fila
       if (generalQueue.some((p) => p.userId === userId)) {
-        await interaction.reply({
+        await interaction.editReply({
           content: '⚠️ Você já está na fila! Aguarde os outros jogadores entrarem.',
-          ephemeral: true,
         });
         return;
       }
@@ -563,9 +562,8 @@ async function handleButtonQueue(interaction: ButtonInteraction) {
         lanes: registeredLanes,
       });
 
-      await interaction.reply({
+      await interaction.editReply({
         content: `🎯 Você entrou na fila! Rotas configuradas: **${registeredLanes.join(', ')}** (${generalQueue.length}/10)`,
-        ephemeral: true,
       });
 
       // Atualiza o painel da fila em tempo real
@@ -583,7 +581,7 @@ async function handleButtonQueue(interaction: ButtonInteraction) {
         await createMatchRoom(interaction.guild!, matchPlayers, currentQueueMode);
       }
     } catch (err: any) {
-      await interaction.reply({ content: `❌ Erro ao entrar na fila: ${err.message}`, ephemeral: true });
+      await interaction.editReply({ content: `❌ Erro ao entrar na fila: ${err.message}` });
     }
   }
 }

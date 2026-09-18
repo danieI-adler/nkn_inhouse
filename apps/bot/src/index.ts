@@ -43,6 +43,8 @@ let currentQueueMode: GameMode = 'RANKED_AUTO';
 
 let permanentQueueChannelId: string | null = null;
 let permanentQueueMessageId: string | null = null;
+let permanentRankingChannelId: string | null = null;
+let permanentRankingMessageId: string | null = null;
 let cachedBannerAttachmentUrl: string | null = null;
 let activeMatchesCount = 0;
 
@@ -94,6 +96,8 @@ client.once('ready', async () => {
           .addStringOption(o => o.setName('vencedor').setDescription('Time vencedor').setRequired(true)
             .addChoices({ name: 'Time Azul', value: 'BLUE' }, { name: 'Time Vermelho', value: 'RED' })),
         new SlashCommandBuilder().setName('ranking').setDescription('Exibe a Leaderboard da comunidade Nukenin'),
+        new SlashCommandBuilder().setName('setup-ranking').setDescription('Cria o painel permanente do Ranking que se autoatualiza')
+          .addChannelOption(o => o.setName('canal').setDescription('Canal onde o ranking será fixado').setRequired(false)),
         new SlashCommandBuilder().setName('set-waiting-room').setDescription('Define o canal de voz geral de espera')
           .addChannelOption(o => o.setName('canal_voz').setDescription('Canal de voz geral').setRequired(true)),
         new SlashCommandBuilder().setName('perfil').setDescription('Exibe o perfil inhouse de um jogador')
@@ -129,7 +133,21 @@ client.once('ready', async () => {
     console.log(`💓 [Heartbeat] Bot vivo | Guilds: ${client.guilds.cache.size} | Ping: ${client.ws.ping}ms | ${new Date().toISOString()}`);
   }, 2 * 60 * 1000);
 
-  // Recupera configurações de fila permanente e modo salvas
+  // Limpeza automática da fila a cada 1 hora (60 minutos)
+  setInterval(async () => {
+    if (generalQueue.length > 0) {
+      console.log(`🧹 [Reset Horário] Limpando fila com ${generalQueue.length} jogadores inativos.`);
+      generalQueue.length = 0;
+      if (process.env.GUILD_ID) {
+        const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
+        if (guild) {
+          await updatePermanentQueueMessage(guild);
+        }
+      }
+    }
+  }, 60 * 60 * 1000);
+
+  // Recupera configurações de fila permanente, ranking permanente e modo salvos
   (async () => {
     try {
       const sRes = await fetch(`${API_BASE_URL}/api/settings`);
@@ -140,40 +158,27 @@ client.once('ready', async () => {
           permanentQueueMessageId = sData.settings.queueMessageId || null;
           console.log(`📌 Canal de fila permanente carregado: ${permanentQueueChannelId}, Msg: ${permanentQueueMessageId}`);
         }
+        if (sData.settings.rankingChannelId) {
+          permanentRankingChannelId = sData.settings.rankingChannelId;
+          permanentRankingMessageId = sData.settings.rankingMessageId || null;
+          console.log(`📌 Canal de ranking permanente carregado: ${permanentRankingChannelId}, Msg: ${permanentRankingMessageId}`);
+        }
         if (sData.settings.queueMode) {
           currentQueueMode = sData.settings.queueMode;
           console.log(`🎮 Modo de fila carregado: ${currentQueueMode}`);
         }
       }
 
-      // Hardcode / Auto-preenchimento temporário para testes:
-      // Coloca automaticamente todos os jogadores vinculados na fila
-      const lRes = await fetch(`${API_BASE_URL}/api/leaderboard`);
-      const lData = await lRes.json();
-      if (lData.leaderboard && Array.isArray(lData.leaderboard)) {
-        for (const p of lData.leaderboard) {
-          if (!generalQueue.some((q) => q.userId === p.discordId)) {
-            generalQueue.push({
-              userId: p.discordId,
-              tag: p.discordTag || p.riotGameName || 'Player',
-              riotName: p.riotGameName,
-              riotTag: p.riotTagLine,
-              lanes: p.registeredLanes && p.registeredLanes.length > 0 ? p.registeredLanes : ['FILL'],
-            });
-          }
-        }
-        console.log(`🎯 [Auto-Fila Teste] ${generalQueue.length} jogadores vinculados inseridos na fila.`);
-      }
-
-      // Atualiza o painel permanente no Discord com a lista populada
+      // Atualiza o painel permanente da fila e do ranking no Discord
       if (process.env.GUILD_ID) {
         const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
         if (guild) {
           await updatePermanentQueueMessage(guild);
+          await updatePermanentRankingMessage(guild);
         }
       }
     } catch (e) {
-      console.warn('Não foi possível carregar configurações de fila permanente na inicialização:', e);
+      console.warn('Não foi possível carregar configurações permanentes na inicialização:', e);
     }
   })();
 
@@ -443,33 +448,38 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.deferReply();
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/leaderboard`);
-      const data = await res.json();
-
-      if (!res.ok || !data.leaderboard || data.leaderboard.length === 0) {
-        await interaction.editReply('📊 Nenhum jogador registrado no ranking até o momento.');
-        return;
-      }
-
-      const medals = ['🥇', '🥈', '🥉'];
-      const rows = data.leaderboard.map((p: any, idx: number) => {
-        const medal = idx < 3 ? medals[idx] : `\`#${idx + 1}\``;
-        const totalGames = p.matchesPlayed || 0;
-        const winrate = totalGames > 0 ? Math.round((p.wins / totalGames) * 100) : 0;
-        return `${medal} **${p.riotGameName}#${p.riotTagLine}** (<@${p.discordId}>)\n` +
-               `⚡ MMR: **${p.internalMmr}** | V: **${p.wins}** D: **${p.losses}** (${winrate}% WR) | Rotas: \`${p.registeredLanes.join(', ')}\``;
-      });
-
-      const embed = new EmbedBuilder()
-        .setTitle('🏆 LEADERBOARD - COMUNIDADE NUKENIN')
-        .setDescription(rows.join('\n\n'))
-        .setColor('#eab308')
-        .setFooter({ text: 'Ranking oficial baseado em MMR interno Nukenin' })
-        .setTimestamp();
-
-      await interaction.editReply({ embeds: [embed] });
+      const payload = await buildRankingEmbedAndButtons();
+      await interaction.editReply(payload);
     } catch (err: any) {
       await interaction.editReply(`❌ Erro ao consultar ranking: ${err.message}`);
+    }
+  }
+
+  if (commandName === 'setup-ranking') {
+    await interaction.deferReply({ ephemeral: true });
+
+    const targetChannel = (interaction.options.getChannel('canal') as any) || interaction.channel;
+    if (!targetChannel || !targetChannel.isTextBased() || !('send' in targetChannel)) {
+      await interaction.editReply('⚠️ Canal inválido para postar o ranking.');
+      return;
+    }
+
+    try {
+      const payload = await buildRankingEmbedAndButtons();
+      const message = await targetChannel.send(payload);
+      permanentRankingChannelId = targetChannel.id;
+      permanentRankingMessageId = message.id;
+
+      // Salva no banco de dados para persistência contínua
+      await fetch(`${API_BASE_URL}/api/settings/ranking-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId: targetChannel.id, messageId: message.id }),
+      });
+
+      await interaction.editReply(`✅ Painel oficial permanente do Ranking fixado com sucesso em <#${targetChannel.id}>!`);
+    } catch (e: any) {
+      await interaction.editReply(`❌ Erro ao configurar painel de ranking: ${e.message}`);
     }
   }
 
@@ -587,7 +597,10 @@ client.on('interactionCreate', async (interaction) => {
 
       // Auto-move dos jogadores de volta para a waiting room e limpeza de canais
       if (activeMatchesCount > 0) activeMatchesCount--;
-      await updatePermanentQueueMessage(interaction.guild!);
+      if (interaction.guild) {
+        await updatePermanentQueueMessage(interaction.guild);
+        await updatePermanentRankingMessage(interaction.guild);
+      }
       await cleanupMatchChannelsAndReturnPlayers(interaction.guild!, matchId);
     } catch (err: any) {
       await interaction.editReply(`❌ Falha: ${err.message}`);
@@ -673,6 +686,20 @@ client.on('error', (err) => {
 async function handleButtonQueue(interaction: ButtonInteraction) {
   const userId = interaction.user.id;
   const customId = interaction.customId;
+
+  // 0. Botão Atualizar Ranking
+  if (customId === 'ranking_refresh') {
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      if (interaction.guild) {
+        await updatePermanentRankingMessage(interaction.guild);
+      }
+      await interaction.editReply({ content: '🔄 Ranking atualizado com sucesso!' });
+    } catch (err: any) {
+      await interaction.editReply({ content: `❌ Erro ao atualizar ranking: ${err.message}` });
+    }
+    return;
+  }
 
   // 1. Botão Sair da Fila
   if (customId === 'queue_leave') {
@@ -1091,6 +1118,64 @@ async function updatePermanentQueueMessage(guild: Guild) {
     });
   } catch (err) {
     console.error('Erro ao atualizar mensagem permanente da fila:', err);
+  }
+}
+
+// Constrói o Embed e os Botões do Painel Permanente de Ranking
+async function buildRankingEmbedAndButtons() {
+  const res = await fetch(`${API_BASE_URL}/api/leaderboard`);
+  const data = await res.json();
+
+  const medals = ['🥇', '🥈', '🥉'];
+  let description = '📊 Nenhum jogador registrado no ranking até o momento.';
+
+  if (res.ok && data.leaderboard && data.leaderboard.length > 0) {
+    const rows = data.leaderboard.map((p: any, idx: number) => {
+      const medal = idx < 3 ? medals[idx] : `\`#${idx + 1}\``;
+      const totalGames = p.matchesPlayed || 0;
+      const winrate = totalGames > 0 ? Math.round((p.wins / totalGames) * 100) : 0;
+      return `${medal} **${p.riotGameName}#${p.riotTagLine}** (<@${p.discordId}>)\n` +
+             `⚡ MMR: **${p.internalMmr}** | V: **${p.wins}** D: **${p.losses}** (${winrate}% WR) | Rotas: \`${(p.registeredLanes || ['FILL']).join(', ')}\``;
+    });
+    description = rows.join('\n\n');
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle('🏆 LEADERBOARD - COMUNIDADE NUKENIN')
+    .setDescription(description)
+    .setColor('#eab308')
+    .setFooter({ text: 'Ranking oficial Nukenin • Atualiza automaticamente a cada partida' })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId('ranking_refresh')
+      .setLabel('Atualizar Ranking')
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji('🔄')
+  );
+
+  return { embeds: [embed], components: [row] };
+}
+
+// Atualiza a mensagem permanente existente do ranking ou recupera ela
+async function updatePermanentRankingMessage(guild: Guild) {
+  if (!permanentRankingChannelId || !permanentRankingMessageId) return;
+
+  try {
+    const channel = await guild.channels.fetch(permanentRankingChannelId).catch(() => null);
+    if (!channel || !channel.isTextBased() || !('messages' in channel)) return;
+
+    const message = await (channel as any).messages.fetch(permanentRankingMessageId).catch(() => null);
+    if (!message) return;
+
+    const payload = await buildRankingEmbedAndButtons();
+    await message.edit({
+      embeds: payload.embeds,
+      components: payload.components,
+    });
+  } catch (err) {
+    console.error('Erro ao atualizar mensagem permanente do ranking:', err);
   }
 }
 

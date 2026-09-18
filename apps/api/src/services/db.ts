@@ -13,6 +13,8 @@ export interface ServerSettings {
   queueChannelId?: string;
   queueMessageId?: string;
   queueMode?: GameMode;
+  rankingChannelId?: string;
+  rankingMessageId?: string;
 }
 
 export class DatabaseService {
@@ -310,6 +312,21 @@ export class DatabaseService {
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
         [JSON.stringify(this.settings)]
       ).catch((err) => console.error('[Supabase] Erro ao salvar settings da fila:', err.message));
+    }
+  }
+
+  setRankingMessage(channelId: string, messageId: string) {
+    this.settings.rankingChannelId = channelId;
+    this.settings.rankingMessageId = messageId;
+    this.saveLocalSettings();
+
+    if (this.pool && this.isSupabaseConnected) {
+      this.pool.query(
+        `INSERT INTO server_settings (key, value, updated_at) 
+         VALUES ('settings', $1, NOW()) 
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+        [JSON.stringify(this.settings)]
+      ).catch((err) => console.error('[Supabase] Erro ao salvar settings do ranking:', err.message));
     }
   }
 

@@ -63,6 +63,16 @@ const commands = [
     .setDescription('Exibe a Leaderboard com o Top jogadores e MMR da comunidade Nukenin'),
 
   new SlashCommandBuilder()
+    .setName('setup-ranking')
+    .setDescription('Cria o painel permanente do Ranking que se autoatualiza com botão de atualizar e pós-partida')
+    .addChannelOption((option) =>
+      option
+        .setName('canal')
+        .setDescription('Canal onde o painel permanente do ranking será fixado')
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
     .setName('set-waiting-room')
     .setDescription('Define o canal de voz geral para onde os jogadores voltam após o término da partida')
     .addChannelOption((option) =>

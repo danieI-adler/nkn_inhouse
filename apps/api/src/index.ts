@@ -154,6 +154,11 @@ async function start() {
     return reply.send({ success: true, settings: db.getSettings() });
   });
 
+  server.post<{ Body: { channelId: string; messageId: string } }>('/api/settings/ranking-message', async (request, reply) => {
+    db.setRankingMessage(request.body.channelId, request.body.messageId);
+    return reply.send({ success: true, settings: db.getSettings() });
+  });
+
   server.post<{ Body: { mode: GameMode } }>('/api/settings/queue-mode', async (request, reply) => {
     db.setQueueMode(request.body.mode);
     return reply.send({ success: true, settings: db.getSettings() });

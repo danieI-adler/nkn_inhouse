@@ -388,49 +388,189 @@ export default function App() {
           activeVersion = DEFAULT_DDRAGON_VER;
         }
 
-        // Busca dados de campeões da Riot DDragon e os dados de rotas de SoloQ (Meraki Analytics)
-        const [ddragonRes, merakiRes] = await Promise.allSettled([
-          fetch(`https://ddragon.leagueoflegends.com/cdn/${activeVersion}/data/pt_BR/champion.json`),
-          fetch('https://cdn.merakianalytics.com/riot/lol/resources/latest/en-US/champions.json'),
-        ]);
-
-        let soloqPositions: Record<string, string[]> = {};
-        if (merakiRes.status === 'fulfilled' && merakiRes.value.ok) {
-          try {
-            const merakiJson = await merakiRes.value.json();
-            for (const [key, val] of Object.entries(merakiJson as any)) {
-              if (val && Array.isArray((val as any).positions)) {
-                soloqPositions[key.toLowerCase()] = (val as any).positions;
-              }
-            }
-          } catch (e) {
-            console.warn('Falha ao processar rotas do Meraki Analytics:', e);
-          }
-        }
-
-        const positionMap: Record<string, Lane> = {
-          TOP: 'TOP',
-          JUNGLE: 'JUNGLE',
-          MIDDLE: 'MID',
-          BOTTOM: 'ADC',
-          UTILITY: 'SUPPORT',
-          SUPPORT: 'SUPPORT',
-        };
-
-        if (ddragonRes.status !== 'fulfilled' || !ddragonRes.value.ok) {
+        // Busca dados oficiais de campeões da Riot DDragon
+        const ddragonRes = await fetch(`https://ddragon.leagueoflegends.com/cdn/${activeVersion}/data/pt_BR/champion.json`);
+        if (!ddragonRes.ok) {
           throw new Error('Falha ao carregar champions.json da Riot');
         }
 
-        const json = await ddragonRes.value.json();
-        const champsList: ChampionData[] = Object.values(json.data).map((c: any) => {
-          const rawPositions = soloqPositions[c.id.toLowerCase()] || soloqPositions[c.name.toLowerCase()];
-          let roles: Lane[] = [];
+        const positionMap: Record<string, Lane[]> = {
+          Aatrox: ['TOP'],
+          Ahri: ['MID'],
+          Akali: ['MID', 'TOP'],
+          Akshan: ['MID', 'ADC'],
+          Alistar: ['SUPPORT'],
+          Amumu: ['JUNGLE', 'SUPPORT'],
+          Anivia: ['MID'],
+          Annie: ['MID', 'SUPPORT'],
+          Aphelios: ['ADC'],
+          Ashe: ['ADC', 'SUPPORT'],
+          AurelionSol: ['MID'],
+          Aurora: ['MID', 'TOP'],
+          Ambessa: ['TOP'],
+          Azir: ['MID'],
+          Bard: ['SUPPORT'],
+          Belveth: ['JUNGLE'],
+          Blitzcrank: ['SUPPORT'],
+          Brand: ['SUPPORT', 'MID', 'JUNGLE'],
+          Braum: ['SUPPORT'],
+          Briar: ['JUNGLE'],
+          Caitlyn: ['ADC'],
+          Camille: ['TOP', 'SUPPORT'],
+          Cassiopeia: ['MID', 'TOP'],
+          Chogath: ['TOP', 'MID'],
+          Corki: ['MID', 'ADC'],
+          Darius: ['TOP'],
+          Diana: ['JUNGLE', 'MID'],
+          Draven: ['ADC'],
+          DrMundo: ['TOP', 'JUNGLE'],
+          Ekko: ['JUNGLE', 'MID'],
+          Elise: ['JUNGLE'],
+          Evelynn: ['JUNGLE'],
+          Ezreal: ['ADC', 'MID'],
+          Fiddlesticks: ['JUNGLE'],
+          Fiora: ['TOP'],
+          Fizz: ['MID'],
+          Galio: ['MID', 'SUPPORT'],
+          Gangplank: ['TOP', 'MID'],
+          Garen: ['TOP'],
+          Gnar: ['TOP'],
+          Gragas: ['TOP', 'JUNGLE', 'MID'],
+          Graves: ['JUNGLE'],
+          Gwen: ['TOP', 'JUNGLE'],
+          Hecarim: ['JUNGLE'],
+          Heimerdinger: ['TOP', 'MID', 'SUPPORT'],
+          Hwei: ['MID', 'SUPPORT'],
+          Illaoi: ['TOP'],
+          Irelia: ['TOP', 'MID'],
+          Ivern: ['JUNGLE', 'SUPPORT'],
+          Janna: ['SUPPORT'],
+          JarvanIV: ['JUNGLE', 'TOP'],
+          Jax: ['TOP', 'JUNGLE'],
+          Jayce: ['TOP', 'MID'],
+          Jhin: ['ADC'],
+          Jinx: ['ADC'],
+          Kaisa: ['ADC'],
+          Kalista: ['ADC'],
+          Karma: ['SUPPORT', 'MID'],
+          Karthus: ['JUNGLE', 'ADC'],
+          Kassadin: ['MID'],
+          Katarina: ['MID'],
+          Kayle: ['TOP', 'MID'],
+          Kayn: ['JUNGLE'],
+          Kennen: ['TOP', 'MID'],
+          Khazix: ['JUNGLE'],
+          Kindred: ['JUNGLE'],
+          Kled: ['TOP', 'MID'],
+          KogMaw: ['ADC'],
+          KSante: ['TOP'],
+          Leblanc: ['MID'],
+          LeeSin: ['JUNGLE', 'TOP'],
+          Leona: ['SUPPORT'],
+          Lillia: ['JUNGLE'],
+          Lissandra: ['MID'],
+          Lucian: ['ADC', 'MID'],
+          Lulu: ['SUPPORT'],
+          Lux: ['SUPPORT', 'MID'],
+          Malphite: ['TOP', 'MID', 'SUPPORT'],
+          Malzahar: ['MID'],
+          Maokai: ['SUPPORT', 'TOP', 'JUNGLE'],
+          MasterYi: ['JUNGLE'],
+          Mel: ['MID', 'SUPPORT'],
+          Milio: ['SUPPORT'],
+          MissFortune: ['ADC'],
+          Mordekaiser: ['TOP', 'JUNGLE'],
+          Morgana: ['SUPPORT', 'MID'],
+          Naafiri: ['MID', 'TOP'],
+          Nami: ['SUPPORT'],
+          Nasus: ['TOP'],
+          Nautilus: ['SUPPORT'],
+          Neeko: ['MID', 'SUPPORT'],
+          Nidalee: ['JUNGLE'],
+          Nilah: ['ADC'],
+          Nocturne: ['JUNGLE'],
+          Nunu: ['JUNGLE', 'MID'],
+          Olaf: ['TOP', 'JUNGLE'],
+          Orianna: ['MID'],
+          Ornn: ['TOP'],
+          Pantheon: ['SUPPORT', 'MID', 'TOP'],
+          Poppy: ['JUNGLE', 'TOP', 'SUPPORT'],
+          Pyke: ['SUPPORT', 'MID'],
+          Qiyana: ['MID', 'JUNGLE'],
+          Quinn: ['TOP', 'ADC'],
+          Rakan: ['SUPPORT'],
+          Rammus: ['JUNGLE'],
+          RekSai: ['JUNGLE'],
+          Rell: ['SUPPORT', 'JUNGLE'],
+          Renata: ['SUPPORT'],
+          Renekton: ['TOP', 'MID'],
+          Rengar: ['JUNGLE', 'TOP'],
+          Riven: ['TOP', 'MID'],
+          Rumble: ['TOP', 'MID'],
+          Ryze: ['MID', 'TOP'],
+          Samira: ['ADC'],
+          Sejuani: ['JUNGLE', 'TOP'],
+          Senna: ['SUPPORT', 'ADC'],
+          Seraphine: ['SUPPORT', 'ADC', 'MID'],
+          Sett: ['TOP', 'MID'],
+          Shaco: ['JUNGLE', 'SUPPORT'],
+          Shen: ['TOP', 'SUPPORT'],
+          Shyvana: ['JUNGLE'],
+          Singed: ['TOP'],
+          Sion: ['TOP'],
+          Sivir: ['ADC'],
+          Skarner: ['JUNGLE', 'TOP'],
+          Smolder: ['ADC', 'MID'],
+          Sona: ['SUPPORT'],
+          Soraka: ['SUPPORT'],
+          Swain: ['SUPPORT', 'MID', 'ADC'],
+          Sylas: ['MID', 'JUNGLE'],
+          Syndra: ['MID'],
+          TahmKench: ['TOP', 'SUPPORT'],
+          Taliyah: ['JUNGLE', 'MID'],
+          Talon: ['MID', 'JUNGLE'],
+          Taric: ['SUPPORT'],
+          Teemo: ['TOP'],
+          Thresh: ['SUPPORT'],
+          Tristana: ['ADC', 'MID'],
+          Trundle: ['TOP', 'JUNGLE'],
+          Tryndamere: ['TOP', 'MID'],
+          TwistedFate: ['MID', 'ADC'],
+          Twitch: ['ADC', 'SUPPORT'],
+          Udyr: ['JUNGLE', 'TOP'],
+          Urgot: ['TOP'],
+          Varus: ['ADC', 'MID'],
+          Vayne: ['ADC', 'TOP'],
+          Veigar: ['MID', 'ADC'],
+          Velkoz: ['SUPPORT', 'MID'],
+          Vex: ['MID'],
+          Vi: ['JUNGLE'],
+          Viego: ['JUNGLE', 'MID'],
+          Viktor: ['MID'],
+          Vladimir: ['MID', 'TOP'],
+          Volibear: ['TOP', 'JUNGLE'],
+          Warwick: ['JUNGLE', 'TOP'],
+          Wukong: ['JUNGLE', 'TOP'],
+          Xayah: ['ADC'],
+          Xerath: ['SUPPORT', 'MID'],
+          XinZhao: ['JUNGLE'],
+          Yasuo: ['MID', 'ADC', 'TOP'],
+          Yone: ['MID', 'TOP'],
+          Yorick: ['TOP'],
+          Yuumi: ['SUPPORT'],
+          Yunara: ['ADC', 'MID'],
+          Zac: ['JUNGLE', 'TOP'],
+          Zed: ['MID', 'JUNGLE'],
+          Zeri: ['ADC'],
+          Ziggs: ['ADC', 'MID'],
+          Zilean: ['SUPPORT', 'MID'],
+          Zoe: ['MID', 'SUPPORT'],
+          Zyra: ['SUPPORT', 'JUNGLE'],
+        };
 
-          if (rawPositions && rawPositions.length > 0) {
-            roles = rawPositions
-              .map((pos) => positionMap[pos.toUpperCase()])
-              .filter(Boolean) as Lane[];
-          }
+        const json = await ddragonRes.json();
+        const champsList: ChampionData[] = Object.values(json.data).map((c: any) => {
+          let roles: Lane[] = positionMap[c.id] || positionMap[c.name] || [];
 
           // Se o campeão for novo/não catalogado em SoloQ, aplica fallback inteligente por tags
           if (roles.length === 0) {
@@ -675,7 +815,7 @@ export default function App() {
   };
 
   const canUserAct = useMemo(() => {
-    if (draftPhase === 'READY_CHECK') return false;
+    if (isSocketMode && draftPhase === 'READY_CHECK') return false;
     if (isCompleted || !currentStep) return false;
     if (isSocketMode) {
       if (userRole === 'BLUE_CAPTAIN' && currentStep.team === 'BLUE') return true;

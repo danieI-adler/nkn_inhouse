@@ -34,7 +34,7 @@ const SPECIAL_CHAMPIONS: ChampionData[] = [
     id: 'Aurora',
     name: 'Aurora',
     title: 'A Bruxa Entre Mundos',
-    roles: ['MID'],
+    roles: ['MID', 'TOP'],
     customAvatar: 'https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Aurora.png',
     customSplash: 'https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Aurora_0.jpg',
   },
@@ -42,7 +42,7 @@ const SPECIAL_CHAMPIONS: ChampionData[] = [
     id: 'Ambessa',
     name: 'Ambessa',
     title: 'A Matriarca da Guerra',
-    roles: ['TOP', 'JUNGLE'],
+    roles: ['TOP'],
     customAvatar: 'https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Ambessa.png',
     customSplash: 'https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ambessa_0.jpg',
   },
@@ -59,24 +59,24 @@ const SPECIAL_CHAMPIONS: ChampionData[] = [
     name: 'Yunara',
     title: 'A Fé Inabalável',
     roles: ['ADC'],
-    customAvatar: 'https://images.contentstack.io/v3/assets/blt731acb42bb3d1659/blt6d5d5402a5cf38b1/660c1d68a25c6020c647ceb5/lol-champion-icon-placeholder.jpg',
-    customSplash: 'https://images.contentstack.io/v3/assets/blt731acb42bb3d1659/blt56e1da3e2d6bce18/668461fc1da09b1836f3387a/aurora-avatar.jpg',
+    customAvatar: 'https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Yunara.png',
+    customSplash: 'https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Yunara_0.jpg',
   },
   {
     id: 'Zaahen',
     name: 'Zaahen',
-    title: 'O Indiviso',
+    title: 'O Indissociável',
     roles: ['TOP'],
-    customAvatar: 'https://images.contentstack.io/v3/assets/blt731acb42bb3d1659/blt545e8f495b452e8c/672a265691079d39b893a70b/ambessa-avatar.jpg',
-    customSplash: 'https://images.contentstack.io/v3/assets/blt731acb42bb3d1659/blta82136e07e866e4e/672a2657e2c9183ec9e4ba6f/ambessa-splash.jpg',
+    customAvatar: 'https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Zaahen.png',
+    customSplash: 'https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Zaahen_0.jpg',
   },
   {
     id: 'Locke',
     name: 'Locke',
-    title: 'O Exorcista Cinzento',
+    title: 'O Exorcista das Cinzas',
     roles: ['MID'],
-    customAvatar: 'https://images.contentstack.io/v3/assets/blt731acb42bb3d1659/blt3f0a9a1d13f9c3f4/677f276c1dc11054a85ba46b/mel-avatar.jpg',
-    customSplash: 'https://images.contentstack.io/v3/assets/blt731acb42bb3d1659/bltd1dcae3a3f5a285b/677f276cd86ef259b1fa9f12/mel-splash.jpg',
+    customAvatar: 'https://ddragon.leagueoflegends.com/cdn/16.18.1/img/champion/Locke.png',
+    customSplash: 'https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Locke_0.jpg',
   },
 ];
 
@@ -306,29 +306,81 @@ export default function App() {
           activeVersion = DEFAULT_DDRAGON_VER;
         }
 
-        const res = await fetch(`https://ddragon.leagueoflegends.com/cdn/${activeVersion}/data/pt_BR/champion.json`);
-        const json = await res.json();
-        const champsList: ChampionData[] = Object.values(json.data).map((c: any) => ({
-          id: c.id,
-          name: c.name,
-          title: c.title,
-          roles: c.tags.includes('Marksman')
-            ? ['ADC']
-            : c.tags.includes('Support')
-            ? ['SUPPORT']
-            : c.tags.includes('Tank')
-            ? ['TOP', 'SUPPORT']
-            : c.tags.includes('Mage')
-            ? ['MID']
-            : c.tags.includes('Assassin')
-            ? ['MID', 'JUNGLE']
-            : ['TOP'],
-        }));
+        // Busca dados de campeões da Riot DDragon e os dados de rotas de SoloQ (Meraki Analytics)
+        const [ddragonRes, merakiRes] = await Promise.allSettled([
+          fetch(`https://ddragon.leagueoflegends.com/cdn/${activeVersion}/data/pt_BR/champion.json`),
+          fetch('https://cdn.merakianalytics.com/riot/lol/resources/latest/en-US/champions.json'),
+        ]);
 
-        // Adiciona os campeões especiais que não estão no DDragon 14.10.1
+        let soloqPositions: Record<string, string[]> = {};
+        if (merakiRes.status === 'fulfilled' && merakiRes.value.ok) {
+          try {
+            const merakiJson = await merakiRes.value.json();
+            for (const [key, val] of Object.entries(merakiJson as any)) {
+              if (val && Array.isArray((val as any).positions)) {
+                soloqPositions[key.toLowerCase()] = (val as any).positions;
+              }
+            }
+          } catch (e) {
+            console.warn('Falha ao processar rotas do Meraki Analytics:', e);
+          }
+        }
+
+        const positionMap: Record<string, Lane> = {
+          TOP: 'TOP',
+          JUNGLE: 'JUNGLE',
+          MIDDLE: 'MID',
+          BOTTOM: 'ADC',
+          UTILITY: 'SUPPORT',
+          SUPPORT: 'SUPPORT',
+        };
+
+        if (ddragonRes.status !== 'fulfilled' || !ddragonRes.value.ok) {
+          throw new Error('Falha ao carregar champions.json da Riot');
+        }
+
+        const json = await ddragonRes.value.json();
+        const champsList: ChampionData[] = Object.values(json.data).map((c: any) => {
+          const rawPositions = soloqPositions[c.id.toLowerCase()] || soloqPositions[c.name.toLowerCase()];
+          let roles: Lane[] = [];
+
+          if (rawPositions && rawPositions.length > 0) {
+            roles = rawPositions
+              .map((pos) => positionMap[pos.toUpperCase()])
+              .filter(Boolean) as Lane[];
+          }
+
+          // Se o campeão for novo/não catalogado em SoloQ, aplica fallback inteligente por tags
+          if (roles.length === 0) {
+            if (c.tags.includes('Marksman')) roles.push('ADC');
+            if (c.tags.includes('Support')) roles.push('SUPPORT');
+            if (c.tags.includes('Assassin')) roles.push('MID', 'JUNGLE');
+            if (c.tags.includes('Mage')) roles.push('MID', 'SUPPORT');
+            if (c.tags.includes('Tank') || c.tags.includes('Fighter')) roles.push('TOP');
+            if (roles.length === 0) roles.push('MID');
+          }
+
+          // Remove duplicatas
+          roles = Array.from(new Set(roles));
+
+          return {
+            id: c.id,
+            name: c.name,
+            title: c.title,
+            roles,
+          };
+        });
+
+        // Adiciona os campeões especiais caso algum não esteja no DDragon ativo
         const existingIds = new Set(champsList.map((c) => c.id.toLowerCase()));
         for (const special of SPECIAL_CHAMPIONS) {
-          if (!existingIds.has(special.id.toLowerCase())) {
+          const existing = champsList.find((c) => c.id.toLowerCase() === special.id.toLowerCase());
+          if (existing) {
+            // Garante que se o especial tem roles oficiais (ex: Zaahen, Locke), elas são respeitadas
+            if (special.roles && special.roles.length > 0 && existing.roles.length <= 1) {
+              existing.roles = Array.from(new Set([...existing.roles, ...special.roles]));
+            }
+          } else {
             champsList.push(special);
           }
         }
@@ -336,7 +388,7 @@ export default function App() {
         champsList.sort((a, b) => a.name.localeCompare(b.name));
         setChampions(champsList);
       } catch (err) {
-        console.error('Erro ao carregar Data Dragon:', err);
+        console.error('Erro ao carregar Data Dragon / Meraki:', err);
         setChampions(SPECIAL_CHAMPIONS);
       } finally {
         setLoadingChamps(false);

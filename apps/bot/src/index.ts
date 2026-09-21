@@ -1134,8 +1134,11 @@ async function buildRankingEmbedAndButtons() {
       const medal = idx < 3 ? medals[idx] : `\`#${idx + 1}\``;
       const totalGames = p.matchesPlayed || 0;
       const winrate = totalGames > 0 ? Math.round((p.wins / totalGames) * 100) : 0;
-      return `${medal} **${p.riotGameName}#${p.riotTagLine}** (<@${p.discordId}>)\n` +
-             `⚡ MMR: **${p.internalMmr}** | V: **${p.wins}** D: **${p.losses}** (${winrate}% WR) | Rotas: \`${(p.registeredLanes || ['FILL']).join(', ')}\``;
+      const nameTag = p.riotGameName
+        ? `${p.riotGameName}#${p.riotTagLine || 'BR1'}`
+        : p.discordTag || `Jogador <@${p.discordId}>`;
+      return `${medal} **${nameTag}** (<@${p.discordId}>)\n` +
+             `⚡ MMR: **${p.internalMmr}** | V: **${p.wins || 0}** D: **${p.losses || 0}** (${winrate}% WR) | Rotas: \`${(p.registeredLanes || ['FILL']).join(', ')}\``;
     });
     description = rows.join('\n\n');
   }

@@ -1,9 +1,31 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { MatchData, DraftState, Lane } from '@nkn/shared';
 
-const D_DRAGON_VER = '14.10.1';
+let cachedDDragonVer = '16.18.1';
+let lastVersionFetch = 0;
+
+async function getDDragonVersion(): Promise<string> {
+  const now = Date.now();
+  if (now - lastVersionFetch < 3600000 && cachedDDragonVer) {
+    return cachedDDragonVer;
+  }
+  try {
+    const res = await fetch('https://ddragon.leagueoflegends.com/api/versions.json');
+    if (res.ok) {
+      const versions = (await res.json()) as string[];
+      if (versions && versions.length > 0) {
+        cachedDDragonVer = versions[0];
+        lastVersionFetch = now;
+      }
+    }
+  } catch (err) {
+    console.warn('[CardRenderer] Falha ao buscar versões do DDragon, usando fallback 16.18.1:', err);
+  }
+  return cachedDDragonVer;
+}
 
 export async function generateMatchCard(match: MatchData, draftState: DraftState): Promise<Buffer> {
+  const ddragonVer = await getDDragonVersion();
   const width = 1200;
   const height = 675;
   const canvas = createCanvas(width, height);
@@ -82,7 +104,7 @@ export async function generateMatchCard(match: MatchData, draftState: DraftState
 
     // Splash Art (Carrega ou fallback)
     try {
-      const splashUrl = `https://ddragon.leagueoflegends.com/cdn/${D_DRAGON_VER}/img/champion/${pick.championId}.png`;
+      const splashUrl = `https://ddragon.leagueoflegends.com/cdn/${ddragonVer}/img/champion/${pick.championId}.png`;
       const img = await loadImage(splashUrl);
       ctx.drawImage(img, 65, y + 5, 60, 60);
     } catch {
@@ -125,7 +147,7 @@ export async function generateMatchCard(match: MatchData, draftState: DraftState
 
     // Splash Art
     try {
-      const splashUrl = `https://ddragon.leagueoflegends.com/cdn/${D_DRAGON_VER}/img/champion/${pick.championId}.png`;
+      const splashUrl = `https://ddragon.leagueoflegends.com/cdn/${ddragonVer}/img/champion/${pick.championId}.png`;
       const img = await loadImage(splashUrl);
       ctx.drawImage(img, x + slotWidth - 65, y + 5, 60, 60);
     } catch {
@@ -174,7 +196,7 @@ export async function generateMatchCard(match: MatchData, draftState: DraftState
 
     if (banId && banId !== 'None') {
       try {
-        const banImg = await loadImage(`https://ddragon.leagueoflegends.com/cdn/${D_DRAGON_VER}/img/champion/${banId}.png`);
+        const banImg = await loadImage(`https://ddragon.leagueoflegends.com/cdn/${ddragonVer}/img/champion/${banId}.png`);
         ctx.drawImage(banImg, bx, by, 36, 36);
         // Efeito de risco diagonal de ban
         ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
@@ -203,7 +225,7 @@ export async function generateMatchCard(match: MatchData, draftState: DraftState
 
     if (banId && banId !== 'None') {
       try {
-        const banImg = await loadImage(`https://ddragon.leagueoflegends.com/cdn/${D_DRAGON_VER}/img/champion/${banId}.png`);
+        const banImg = await loadImage(`https://ddragon.leagueoflegends.com/cdn/${ddragonVer}/img/champion/${banId}.png`);
         ctx.drawImage(banImg, bx, by, 36, 36);
         ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
         ctx.lineWidth = 2;

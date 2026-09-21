@@ -133,7 +133,7 @@ async function start() {
 
   // 3.1. Rota de Leaderboard / Ranking Geral
   server.get('/api/leaderboard', async (_request, reply) => {
-    const all = db.getAllPlayers();
+    const all = await db.getAllPlayersAsync();
     // Ordena por MMR decrescente
     all.sort((a, b) => b.internalMmr - a.internalMmr);
     return reply.send({ success: true, leaderboard: all.slice(0, 20) });
@@ -345,7 +345,8 @@ async function start() {
       const openSkillResults = calculateMatchOpenSkill(teamAPlayers, teamBPlayers, winner === 'BLUE');
 
       // Aplica atualização ao Time Azul
-      openSkillResults.teamAUpdates.forEach((upd: any, idx: number) => {
+      for (let idx = 0; idx < teamAPlayers.length; idx++) {
+        const upd = openSkillResults.teamAUpdates[idx];
         const pid = teamAPlayers[idx].discordId;
         const p = db.getPlayer(pid);
         if (p) {
@@ -354,7 +355,7 @@ async function start() {
           p.internalMmr = upd.newMmr;
           p.matchesPlayed++;
           if (winner === 'BLUE') p.wins++; else p.losses++;
-          db.setPlayer(p.discordId, p);
+          await db.setPlayerAsync(p.discordId, p);
           resultsSummary.push({
             discordId: p.discordId,
             riotGameName: p.riotGameName,
@@ -363,10 +364,11 @@ async function start() {
             won: winner === 'BLUE',
           });
         }
-      });
+      }
 
       // Aplica atualização ao Time Vermelho
-      openSkillResults.teamBUpdates.forEach((upd: any, idx: number) => {
+      for (let idx = 0; idx < teamBPlayers.length; idx++) {
+        const upd = openSkillResults.teamBUpdates[idx];
         const pid = teamBPlayers[idx].discordId;
         const p = db.getPlayer(pid);
         if (p) {
@@ -375,7 +377,7 @@ async function start() {
           p.internalMmr = upd.newMmr;
           p.matchesPlayed++;
           if (winner === 'RED') p.wins++; else p.losses++;
-          db.setPlayer(p.discordId, p);
+          await db.setPlayerAsync(p.discordId, p);
           resultsSummary.push({
             discordId: p.discordId,
             riotGameName: p.riotGameName,
@@ -384,7 +386,7 @@ async function start() {
             won: winner === 'RED',
           });
         }
-      });
+      }
     }
 
     return reply.send({ success: true, winner, results: resultsSummary });

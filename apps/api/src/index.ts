@@ -227,7 +227,24 @@ async function start() {
       blueSlots,
       redSlots,
       async (finalDraftState) => {
-        // Callback de Draft Concluído
+        // Callback de Draft Concluído: atualiza os campeões escolhidos (e trocados) em cada slot
+        if (finalDraftState.bluePicks && finalDraftState.bluePicks.length === 5) {
+          match.blueTeam.forEach((slot, idx) => {
+            if (finalDraftState.bluePicks[idx]) {
+              slot.championId = finalDraftState.bluePicks[idx].championId;
+              slot.championName = finalDraftState.bluePicks[idx].championName;
+            }
+          });
+        }
+        if (finalDraftState.redPicks && finalDraftState.redPicks.length === 5) {
+          match.redTeam.forEach((slot, idx) => {
+            if (finalDraftState.redPicks[idx]) {
+              slot.championId = finalDraftState.redPicks[idx].championId;
+              slot.championName = finalDraftState.redPicks[idx].championName;
+            }
+          });
+        }
+
         match.status = 'IN_PROGRESS';
         db.setMatch(matchId, match);
 

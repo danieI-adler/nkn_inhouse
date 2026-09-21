@@ -167,6 +167,34 @@ export default function App() {
   const [redConnected, setRedConnected] = useState(false);
   const [isSocketMode, setIsSocketMode] = useState(false);
 
+  // Transição Cinematográfica estilo CBLOL / Broadcast
+  const [cutscene, setCutscene] = useState<{
+    type: 'BAN' | 'PICK';
+    team: TeamSide;
+    champ: ChampionData;
+    playerName?: string;
+  } | null>(null);
+
+  const prevBlueBansCount = useRef(0);
+  const prevRedBansCount = useRef(0);
+  const prevBluePicksCount = useRef(0);
+  const prevRedPicksCount = useRef(0);
+  const cutsceneTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const triggerCutscene = (
+    type: 'BAN' | 'PICK',
+    team: TeamSide,
+    champ: ChampionData,
+    playerName?: string
+  ) => {
+    if (!champ || !champ.id || champ.id === 'None') return;
+    if (cutsceneTimeout.current) clearTimeout(cutsceneTimeout.current);
+    setCutscene({ type, team, champ, playerName });
+    cutsceneTimeout.current = setTimeout(() => {
+      setCutscene(null);
+    }, 1600);
+  };
+
   // Sincronização via Socket.io com o Backend da Inhouse (jogadores reais do Discord)
   useEffect(() => {
     const hash = window.location.hash || '';
@@ -232,28 +260,78 @@ export default function App() {
         setStepIndex(state.stepIndex);
       }
 
+      let currentBluePlayers = bluePlayers;
+      let currentRedPlayers = redPlayers;
+
       if (state.blueSlots && state.blueSlots.length === 5) {
-        setBluePlayers(state.blueSlots.map((s: any) => s.riotGameName || (s.riotId ? s.riotId.split('#')[0] : '') || s.discordTag || 'Jogador'));
+        currentBluePlayers = state.blueSlots.map((s: any) => s.riotGameName || (s.riotId ? s.riotId.split('#')[0] : '') || s.discordTag || 'Jogador');
+        setBluePlayers(currentBluePlayers);
       }
       if (state.redSlots && state.redSlots.length === 5) {
-        setRedPlayers(state.redSlots.map((s: any) => s.riotGameName || (s.riotId ? s.riotId.split('#')[0] : '') || s.discordTag || 'Jogador'));
+        currentRedPlayers = state.redSlots.map((s: any) => s.riotGameName || (s.riotId ? s.riotId.split('#')[0] : '') || s.discordTag || 'Jogador');
+        setRedPlayers(currentRedPlayers);
       }
 
+      // Detecta novos bans para animação estilo CBLOL
       if (Array.isArray(state.blueBans)) {
+        if (state.blueBans.length > prevBlueBansCount.current) {
+          const newestBanId = state.blueBans[state.blueBans.length - 1];
+          const foundChamp = champions.find(c => c.id === newestBanId) || { id: newestBanId, name: newestBanId, roles: [] };
+          triggerCutscene('BAN', 'BLUE', foundChamp);
+        }
+        prevBlueBansCount.current = state.blueBans.length;
         setBlueBans(state.blueBans.map((b: string) => ({ id: b, name: b, roles: [] })));
       }
+
       if (Array.isArray(state.redBans)) {
+        if (state.redBans.length > prevRedBansCount.current) {
+          const newestBanId = state.redBans[state.redBans.length - 1];
+          const foundChamp = champions.find(c => c.id === newestBanId) || { id: newestBanId, name: newestBanId, roles: [] };
+          triggerCutscene('BAN', 'RED', foundChamp);
+        }
+        prevRedBansCount.current = state.redBans.length;
         setRedBans(state.redBans.map((b: string) => ({ id: b, name: b, roles: [] })));
       }
+
+      // Detecta novos picks para animação estilo CBLOL
       if (Array.isArray(state.bluePicks)) {
+        if (state.bluePicks.length > prevBluePicksCount.current && state.phase !== 'SWAP_ROLES' && !state.isCompleted) {
+          const newestPick = state.bluePicks[state.bluePicks.length - 1];
+          const pickIdx = state.bluePicks.length - 1;
+          const foundChamp = champions.find(c => c.id === newestPick.championId) || {
+            id: newestPick.championId,
+            name: newestPick.championName || newestPick.championId,
+            roles: [],
+          };
+          triggerCutscene('PICK', 'BLUE', foundChamp, currentBluePlayers[pickIdx]);
+        }
+        prevBluePicksCount.current = state.bluePicks.length;
         setBluePicks(state.bluePicks.map((p: any) => ({ id: p.championId, name: p.championName, roles: [] })));
       }
+
       if (Array.isArray(state.redPicks)) {
+        if (state.redPicks.length > prevRedPicksCount.current && state.phase !== 'SWAP_ROLES' && !state.isCompleted) {
+          const newestPick = state.redPicks[state.redPicks.length - 1];
+          const pickIdx = state.redPicks.length - 1;
+          const foundChamp = champions.find(c => c.id === newestPick.championId) || {
+            id: newestPick.championId,
+            name: newestPick.championName || newestPick.championId,
+            roles: [],
+          };
+          triggerCutscene('PICK', 'RED', foundChamp, currentRedPlayers[pickIdx]);
+        }
+        prevRedPicksCount.current = state.redPicks.length;
         setRedPicks(state.redPicks.map((p: any) => ({ id: p.championId, name: p.championName, roles: [] })));
       }
     };
 
     socket.on('draft_init', (data: any) => {
+      if (data?.state) {
+        prevBlueBansCount.current = data.state.blueBans?.length || 0;
+        prevRedBansCount.current = data.state.redBans?.length || 0;
+        prevBluePicksCount.current = data.state.bluePicks?.length || 0;
+        prevRedPicksCount.current = data.state.redPicks?.length || 0;
+      }
       syncState(data.state, data.userRole);
     });
 
@@ -274,6 +352,10 @@ export default function App() {
       setSelectedChampion(null);
     });
 
+    socket.on('roles_updated', (data: any) => {
+      syncState(data.state);
+    });
+
     socket.on('timer_tick', (data: { secondsRemaining: number }) => {
       setTimer(data.secondsRemaining);
       if (data.secondsRemaining <= 30 && draftPhase === 'SWAP_ROLES') {
@@ -289,7 +371,7 @@ export default function App() {
     return () => {
       socket.disconnect();
     };
-  }, []);
+  }, [champions]);
 
   // 1. Carrega dinamicamente a versão mais recente e todos os campeões oficiais via Data Dragon
   useEffect(() => {
@@ -485,9 +567,13 @@ export default function App() {
 
     // Modo simulador local offline
     if (currentStep.type === 'BAN') {
+      triggerCutscene('BAN', currentStep.team, champ);
       if (currentStep.team === 'BLUE') setBlueBans((prev) => [...prev, champ]);
       else setRedBans((prev) => [...prev, champ]);
     } else {
+      const currentPicks = currentStep.team === 'BLUE' ? bluePicks : redPicks;
+      const playersList = currentStep.team === 'BLUE' ? bluePlayers : redPlayers;
+      triggerCutscene('PICK', currentStep.team, champ, playersList[currentPicks.length]);
       if (currentStep.team === 'BLUE') setBluePicks((prev) => [...prev, champ]);
       else setRedPicks((prev) => [...prev, champ]);
     }
@@ -545,6 +631,20 @@ export default function App() {
         const temp = next[swapSourceIndex.index];
         next[swapSourceIndex.index] = next[clickedIndex];
         next[clickedIndex] = temp;
+
+        if (isSocketMode && socketRef.current && matchId && captainToken) {
+          socketRef.current.emit('swap_roles', {
+            matchId,
+            token: captainToken,
+            side: 'BLUE',
+            picksWithLanes: next.map((p, i) => ({
+              championId: p.id,
+              championName: p.name,
+              lane: LANES_ORDER[i],
+            })),
+          });
+        }
+
         return next;
       });
     } else {
@@ -553,6 +653,20 @@ export default function App() {
         const temp = next[swapSourceIndex.index];
         next[swapSourceIndex.index] = next[clickedIndex];
         next[clickedIndex] = temp;
+
+        if (isSocketMode && socketRef.current && matchId && captainToken) {
+          socketRef.current.emit('swap_roles', {
+            matchId,
+            token: captainToken,
+            side: 'RED',
+            picksWithLanes: next.map((p, i) => ({
+              championId: p.id,
+              championName: p.name,
+              lane: LANES_ORDER[i],
+            })),
+          });
+        }
+
         return next;
       });
     }
@@ -586,7 +700,99 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#07050f] text-white flex flex-col font-sans select-none overflow-x-hidden">
+    <div className="min-h-screen bg-[#07050f] text-white flex flex-col font-sans select-none overflow-x-hidden relative">
+      {/* ===================== CINEMÁTICA ESTILO CBLOL / BROADCAST ===================== */}
+      {cutscene && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center pointer-events-none overflow-hidden select-none bg-black/85 backdrop-blur-md transition-all">
+          {/* Fundo Splash Art Dinâmica */}
+          <div className="absolute inset-0 overflow-hidden">
+            <img
+              src={getSplashUrl(cutscene.champ)}
+              alt={cutscene.champ.name}
+              className={`w-full h-full object-cover object-center animate-splash-cinematic ${
+                cutscene.type === 'BAN'
+                  ? 'filter grayscale contrast-150 brightness-75'
+                  : 'filter contrast-125 brightness-110'
+              }`}
+            />
+            {/* Vinheta escura nas bordas e gradientes */}
+            <div className="absolute inset-0 bg-radial from-transparent via-black/60 to-black/95"></div>
+            {cutscene.type === 'BAN' ? (
+              <div className="absolute inset-0 bg-gradient-to-t from-red-950/80 via-transparent to-red-950/80"></div>
+            ) : cutscene.team === 'BLUE' ? (
+              <div className="absolute inset-0 bg-gradient-to-t from-sky-950/70 via-transparent to-sky-950/60"></div>
+            ) : (
+              <div className="absolute inset-0 bg-gradient-to-t from-rose-950/70 via-transparent to-rose-950/60"></div>
+            )}
+          </div>
+
+          {/* Corte Vermelho Diagonal (Estilo Ban CBLOL) */}
+          {cutscene.type === 'BAN' && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-[160%] h-3 bg-red-600 shadow-[0_0_35px_rgba(239,68,68,1),0_0_70px_rgba(220,38,38,0.8)] border-y border-red-300 animate-slash-sweep"></div>
+            </div>
+          )}
+
+          {/* Banner Central com Nome, Ação e Efeitos Neon */}
+          <div className="relative z-10 flex flex-col items-center justify-center text-center px-6 animate-banner-slide max-w-4xl">
+            {cutscene.type === 'BAN' ? (
+              <>
+                <div className="inline-flex items-center gap-2 px-5 py-1.5 rounded-full bg-red-600/30 border border-red-500/70 backdrop-blur shadow-[0_0_20px_rgba(239,68,68,0.5)] mb-3">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
+                  <span className="font-mono text-sm tracking-widest font-extrabold text-red-300 uppercase">
+                    {cutscene.team === 'BLUE' ? 'TIME AZUL BANIU' : 'TIME VERMELHO BANIU'}
+                  </span>
+                </div>
+                <h1 className="font-gamer font-black text-7xl md:text-9xl uppercase tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white via-red-100 to-red-600 drop-shadow-[0_10px_25px_rgba(220,38,38,0.9)]">
+                  {cutscene.champ.name}
+                </h1>
+                <div className="mt-2 text-red-400 font-mono tracking-[0.3em] uppercase text-sm font-semibold">
+                  CAMPEÃO BLOQUEADO • {cutscene.champ.title || 'INDISPONÍVEL'}
+                </div>
+              </>
+            ) : (
+              <>
+                <div
+                  className={`inline-flex items-center gap-2 px-6 py-1.5 rounded-full backdrop-blur mb-3 border ${
+                    cutscene.team === 'BLUE'
+                      ? 'bg-sky-600/30 border-sky-400/80 shadow-[0_0_25px_rgba(56,189,248,0.5)] text-sky-200'
+                      : 'bg-rose-600/30 border-rose-400/80 shadow-[0_0_25px_rgba(244,63,94,0.5)] text-rose-200'
+                  }`}
+                >
+                  <span
+                    className={`w-2.5 h-2.5 rounded-full animate-ping ${
+                      cutscene.team === 'BLUE' ? 'bg-sky-400' : 'bg-rose-400'
+                    }`}
+                  ></span>
+                  <span className="font-mono text-sm tracking-widest font-extrabold uppercase">
+                    {cutscene.team === 'BLUE' ? 'TIME AZUL ESCOLHEU' : 'TIME VERMELHO ESCOLHEU'}
+                  </span>
+                </div>
+
+                {cutscene.playerName && (
+                  <div className="font-mono text-lg md:text-xl font-bold tracking-wider text-yellow-300 uppercase mb-1 drop-shadow">
+                    👤 {cutscene.playerName}
+                  </div>
+                )}
+
+                <h1
+                  className={`font-gamer font-black text-7xl md:text-9xl uppercase tracking-tighter text-transparent bg-clip-text drop-shadow-[0_10px_30px_rgba(0,0,0,0.8)] ${
+                    cutscene.team === 'BLUE'
+                      ? 'bg-gradient-to-b from-white via-sky-200 to-sky-500 drop-shadow-[0_10px_25px_rgba(2,132,199,0.9)]'
+                      : 'bg-gradient-to-b from-white via-rose-200 to-rose-600 drop-shadow-[0_10px_25px_rgba(225,29,72,0.9)]'
+                  }`}
+                >
+                  {cutscene.champ.name}
+                </h1>
+                <div className="mt-2 text-gray-300 font-mono tracking-[0.3em] uppercase text-sm font-semibold">
+                  CONFIRMADO NO TORNEIO • {cutscene.champ.title || 'ESCOLHA OFICIAL'}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Top Header Bar */}
       <header className="h-16 border-b border-purple-900/40 bg-[#0c081a]/95 backdrop-blur px-6 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">

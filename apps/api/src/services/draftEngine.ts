@@ -281,7 +281,7 @@ export class DraftEngine {
     matchId: string,
     token: string,
     side: TeamSide,
-    picksWithLanes: { championId: string; championName: string; lane: Lane; playerPuuid?: string }[]
+    picksWithLanes: { championId: string; championName: string; lane?: Lane; playerPuuid?: string }[]
   ) {
     const room = this.rooms.get(matchId);
     if (!room) return;

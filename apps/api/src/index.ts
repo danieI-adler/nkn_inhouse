@@ -7,7 +7,7 @@ dotenv.config();
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { Server as SocketIOServer } from 'socket.io';
-import { PlayerProfile, MatchData, GameMode } from '@nkn/shared';
+import { PlayerProfile, MatchData, GameMode, Lane } from '@nkn/shared';
 import { RiotService } from './services/riot';
 import { balanceTeams } from './services/matchmaker';
 import { DraftEngine } from './services/draftEngine';
@@ -162,6 +162,99 @@ async function start() {
   server.post<{ Body: { mode: GameMode } }>('/api/settings/queue-mode', async (request, reply) => {
     db.setQueueMode(request.body.mode);
     return reply.send({ success: true, settings: db.getSettings() });
+  });
+
+  // 3.3. Rota para Gerar Partida / Draft de Teste Imediato (sem precisar de 10 jogadores reais)
+  server.post('/api/matches/create-test', async (_request, reply) => {
+    const matchId = `test-${Math.floor(1000 + Math.random() * 9000)}`;
+    const blueToken = `blue-${Math.random().toString(36).substring(2, 10)}`;
+    const redToken = `red-${Math.random().toString(36).substring(2, 10)}`;
+    const specToken = `spec-${Math.random().toString(36).substring(2, 10)}`;
+
+    const lanes: Lane[] = ['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'];
+    const mockBlueNames = ['NKN DanCrox', 'NKN Fogo', 'NKN Shiro', 'NKN Raven', 'NKN Kael'];
+    const mockRedNames = ['NKN Zephyr', 'NKN Shadow', 'NKN Blaze', 'NKN Ghost', 'NKN Frost'];
+
+    const blueSlots = lanes.map((lane, i) => ({
+      discordTag: mockBlueNames[i],
+      riotId: `${mockBlueNames[i]}#BR1`,
+      riotGameName: mockBlueNames[i],
+      lane,
+    }));
+
+    const redSlots = lanes.map((lane, i) => ({
+      discordTag: mockRedNames[i],
+      riotId: `${mockRedNames[i]}#BR1`,
+      riotGameName: mockRedNames[i],
+      lane,
+    }));
+
+    const dummyPlayer = (name: string): PlayerProfile => ({
+      id: `mock-${name}`,
+      discordId: `mock-${name}`,
+      discordTag: name,
+      riotGameName: name,
+      riotTagLine: 'BR1',
+      puuid: `mock-puuid-${name}`,
+      riotRankTier: 'DIAMOND',
+      riotRankDivision: 'I',
+      riotLp: 75,
+      internalMmr: 1200,
+      matchesPlayed: 10,
+      wins: 6,
+      losses: 4,
+      registeredLanes: ['MID'],
+    });
+
+    const match: MatchData = {
+      id: matchId,
+      mode: 'RANKED_AUTO',
+      roomName: `NUKENIN-${matchId.toUpperCase()}`,
+      roomPassword: Math.random().toString(36).substring(2, 6).toUpperCase(),
+      blueTeam: lanes.map((lane, i) => ({
+        player: dummyPlayer(mockBlueNames[i]),
+        assignedLane: lane,
+        team: 'BLUE',
+        isCaptain: i === 0,
+      })),
+      redTeam: lanes.map((lane, i) => ({
+        player: dummyPlayer(mockRedNames[i]),
+        assignedLane: lane,
+        team: 'RED',
+        isCaptain: i === 0,
+      })),
+      createdAt: Date.now(),
+      status: 'DRAFTING',
+      blueCaptainToken: blueToken,
+      redCaptainToken: redToken,
+      spectatorToken: specToken,
+    };
+
+    db.setMatch(matchId, match);
+
+    draftEngine.createRoom(
+      matchId,
+      blueToken,
+      redToken,
+      specToken,
+      blueSlots,
+      redSlots,
+      async (finalDraftState) => {
+        match.status = 'IN_PROGRESS';
+        db.setMatch(matchId, match);
+        io.emit('draft_completed_broadcast', { matchId });
+      }
+    );
+
+    const draftBase = (process.env.WEB_DRAFT_URL || 'https://daniei-adler.github.io/nkn_inhouse').replace(/\/+$/, '');
+
+    return reply.send({
+      success: true,
+      matchId,
+      blueCaptainUrl: `${draftBase}/#/draft/${matchId}?token=${blueToken}`,
+      redCaptainUrl: `${draftBase}/#/draft/${matchId}?token=${redToken}`,
+      spectatorUrl: `${draftBase}/#/draft/${matchId}?token=${specToken}`,
+    });
   });
 
   // 4. Criação de Partida a partir de 10 jogadores

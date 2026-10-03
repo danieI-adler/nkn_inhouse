@@ -1163,9 +1163,20 @@ async function buildRankingEmbedAndButtons() {
 
 // Atualiza a mensagem permanente existente do ranking ou recupera ela
 async function updatePermanentRankingMessage(guild: Guild) {
-  if (!permanentRankingChannelId || !permanentRankingMessageId) return;
-
   try {
+    if (!permanentRankingChannelId || !permanentRankingMessageId) {
+      const sRes = await fetch(`${API_BASE_URL}/api/settings`).catch(() => null);
+      if (sRes && sRes.ok) {
+        const sData = await sRes.json();
+        if (sData.settings?.rankingChannelId && sData.settings?.rankingMessageId) {
+          permanentRankingChannelId = sData.settings.rankingChannelId;
+          permanentRankingMessageId = sData.settings.rankingMessageId;
+        }
+      }
+    }
+
+    if (!permanentRankingChannelId || !permanentRankingMessageId) return;
+
     const channel = await guild.channels.fetch(permanentRankingChannelId).catch(() => null);
     if (!channel || !channel.isTextBased() || !('messages' in channel)) return;
 
@@ -1177,6 +1188,7 @@ async function updatePermanentRankingMessage(guild: Guild) {
       embeds: payload.embeds,
       components: payload.components,
     });
+    console.log('✅ Painel permanente do ranking auto-atualizado com sucesso pós-partida!');
   } catch (err) {
     console.error('Erro ao atualizar mensagem permanente do ranking:', err);
   }

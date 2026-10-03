@@ -136,7 +136,7 @@ async function start() {
     const all = await db.getAllPlayersAsync();
     // Ordena por MMR decrescente
     all.sort((a, b) => b.internalMmr - a.internalMmr);
-    return reply.send({ success: true, leaderboard: all.slice(0, 20) });
+    return reply.send({ success: true, leaderboard: all.slice(0, 50) });
   });
 
   // 3.2. Rotas de Configuração (Waiting Room)

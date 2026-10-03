@@ -101,10 +101,29 @@ export class DatabaseService {
 
     try {
       // 1. Carregar Jogadores
-      const pRes = await this.pool.query('SELECT data FROM players');
+      const pRes = await this.pool.query('SELECT * FROM players');
       for (const row of pRes.rows) {
-        const p = row.data as PlayerProfile;
-        if (p && p.discordId) {
+        const d = (typeof row.data === 'string' ? JSON.parse(row.data) : row.data) || {};
+        const p: PlayerProfile = {
+          id: row.id,
+          discordId: row.discord_id,
+          discordTag: row.discord_tag || d.discordTag || row.riot_game_name,
+          riotGameName: row.riot_game_name,
+          riotTagLine: row.riot_tag_line,
+          puuid: row.puuid || d.puuid,
+          riotRankTier: row.riot_rank_tier || d.riotRankTier,
+          riotRankDivision: row.riot_rank_division || d.riotRankDivision,
+          riotLp: row.riot_lp ?? d.riotLp ?? 0,
+          internalMmr: Number(row.internal_mmr || d.internalMmr || 1200),
+          matchesPlayed: Number(row.matches_played ?? d.matchesPlayed ?? 0),
+          wins: Number(row.wins ?? d.wins ?? 0),
+          losses: Number(row.losses ?? d.losses ?? 0),
+          registeredLanes: Array.isArray(row.registered_lanes) && row.registered_lanes.length > 0
+            ? row.registered_lanes
+            : (Array.isArray(d.registeredLanes) && d.registeredLanes.length > 0 ? d.registeredLanes : ['FILL']),
+          topChampions: d.topChampions || [],
+        };
+        if (p.discordId) {
           this.players.set(p.discordId, p);
         }
       }
@@ -195,13 +214,31 @@ export class DatabaseService {
 
     if (this.pool && this.isSupabaseConnected) {
       try {
-        const res = await this.pool.query('SELECT data FROM players WHERE discord_id = $1', [discordId]);
+        const res = await this.pool.query('SELECT * FROM players WHERE discord_id = $1', [discordId]);
         if (res.rows.length > 0) {
-          const p = res.rows[0].data as PlayerProfile;
-          if (p) {
-            this.players.set(discordId, p);
-            return p;
-          }
+          const row = res.rows[0];
+          const d = (typeof row.data === 'string' ? JSON.parse(row.data) : row.data) || {};
+          const p: PlayerProfile = {
+            id: row.id,
+            discordId: row.discord_id,
+            discordTag: row.discord_tag || d.discordTag || row.riot_game_name,
+            riotGameName: row.riot_game_name,
+            riotTagLine: row.riot_tag_line,
+            puuid: row.puuid || d.puuid,
+            riotRankTier: row.riot_rank_tier || d.riotRankTier,
+            riotRankDivision: row.riot_rank_division || d.riotRankDivision,
+            riotLp: row.riot_lp ?? d.riotLp ?? 0,
+            internalMmr: Number(row.internal_mmr || d.internalMmr || 1200),
+            matchesPlayed: Number(row.matches_played ?? d.matchesPlayed ?? 0),
+            wins: Number(row.wins ?? d.wins ?? 0),
+            losses: Number(row.losses ?? d.losses ?? 0),
+            registeredLanes: Array.isArray(row.registered_lanes) && row.registered_lanes.length > 0
+              ? row.registered_lanes
+              : (Array.isArray(d.registeredLanes) && d.registeredLanes.length > 0 ? d.registeredLanes : ['FILL']),
+            topChampions: d.topChampions || [],
+          };
+          this.players.set(discordId, p);
+          return p;
         }
       } catch (err: any) {
         console.error('[Supabase] Erro no getPlayerAsync:', err.message);

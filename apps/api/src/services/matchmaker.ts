@@ -149,31 +149,37 @@ export function balanceTeams(players: PlayerProfile[]): MatchmakingResult {
       }
     });
 
-    const blueSum = blue.reduce((acc, p) => acc + p.internalMmr, 0);
-    const redSum = red.reduce((acc, p) => acc + p.internalMmr, 0);
+    const blueSum = blue.reduce((acc, p) => acc + (Number(p.internalMmr) || 1200), 0);
+    const redSum = red.reduce((acc, p) => acc + (Number(p.internalMmr) || 1200), 0);
     const diff = Math.abs(blueSum - redSum);
 
-    if (diff < minDiff) {
+    if (diff < minDiff || bestBlue.length === 0) {
       minDiff = diff;
       bestBlue = blue;
       bestRed = red;
     }
   }
 
+  // Fallback de segurança se bestBlue ainda estiver vazio
+  if (bestBlue.length === 0 || bestRed.length === 0) {
+    bestBlue = LANES.map(l => lanePairs[l][0] || sortedPlayers[0]);
+    bestRed = LANES.map(l => lanePairs[l][1] || sortedPlayers[1]);
+  }
+
   // Define capitães como os maiores MMRs de cada lado
-  const blueCaptain = [...bestBlue].sort((a, b) => b.internalMmr - a.internalMmr)[0];
-  const redCaptain = [...bestRed].sort((a, b) => b.internalMmr - a.internalMmr)[0];
+  const blueCaptain = [...bestBlue].sort((a, b) => (Number(b.internalMmr) || 1200) - (Number(a.internalMmr) || 1200))[0] || bestBlue[0];
+  const redCaptain = [...bestRed].sort((a, b) => (Number(b.internalMmr) || 1200) - (Number(a.internalMmr) || 1200))[0] || bestRed[0];
 
   const blueSlots: MatchSlot[] = bestBlue.map((p) => ({
     player: p,
-    assignedLane: assigned.get(p.id)!,
+    assignedLane: assigned.get(p.id) || 'FILL',
     team: 'BLUE',
     isCaptain: p.id === blueCaptain.id,
   }));
 
   const redSlots: MatchSlot[] = bestRed.map((p) => ({
     player: p,
-    assignedLane: assigned.get(p.id)!,
+    assignedLane: assigned.get(p.id) || 'FILL',
     team: 'RED',
     isCaptain: p.id === redCaptain.id,
   }));

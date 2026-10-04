@@ -1097,9 +1097,20 @@ async function buildQueueEmbedAndButtons(imageUrl?: string) {
 
 // Atualiza a mensagem permanente existente ou recupera ela
 async function updatePermanentQueueMessage(guild: Guild) {
-  if (!permanentQueueChannelId || !permanentQueueMessageId) return;
-
   try {
+    if (!permanentQueueChannelId || !permanentQueueMessageId) {
+      const sRes = await fetch(`${API_BASE_URL}/api/settings`).catch(() => null);
+      if (sRes && sRes.ok) {
+        const sData = await sRes.json();
+        if (sData.settings?.queueChannelId && sData.settings?.queueMessageId) {
+          permanentQueueChannelId = sData.settings.queueChannelId;
+          permanentQueueMessageId = sData.settings.queueMessageId;
+        }
+      }
+    }
+
+    if (!permanentQueueChannelId || !permanentQueueMessageId) return;
+
     const channel = await guild.channels.fetch(permanentQueueChannelId).catch(() => null);
     if (!channel || !channel.isTextBased() || !('messages' in channel)) return;
 

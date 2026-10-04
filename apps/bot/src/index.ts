@@ -117,7 +117,8 @@ client.once('ready', async () => {
               { name: 'ARAM / Zoação (Casual)', value: 'CASUAL_ARAM_ZOACAO' })),
         new SlashCommandBuilder().setName('cancelar-partida').setDescription('Cancela uma partida em andamento')
           .addStringOption(o => o.setName('partida_id').setDescription('ID da partida (ex: nkn-5501)').setRequired(true)),
-        new SlashCommandBuilder().setName('test-partida').setDescription('Cria uma partida de teste'),
+        new SlashCommandBuilder().setName('test-partida').setDescription('Cria uma partida de teste')
+          .addBooleanOption(o => o.setName('mover_voz').setDescription('Mover jogadores para a call? (Padrão: falso)').setRequired(false)),
       ].map(cmd => cmd.toJSON());
 
       const rest = new REST({ version: '10' }).setToken(token);
@@ -660,8 +661,9 @@ client.on('interactionCreate', async (interaction) => {
       }
 
       if (interaction.guild) {
-        await createMatchRoom(interaction.guild, testPlayerIds, currentQueueMode);
-        await interaction.editReply(`🎮 **Partida de Teste Criada!** Confira a nova categoria e canais criados no servidor.`);
+        const moveVoice = interaction.options.getBoolean('mover_voz') ?? false;
+        await createMatchRoom(interaction.guild, testPlayerIds, currentQueueMode, moveVoice);
+        await interaction.editReply(`🎮 **Partida de Teste Criada!** Confira a nova categoria e canais criados no servidor.${moveVoice ? ' (Jogadores movidos para call)' : ' (Voz mantida inalterada)'}`);
       }
     } catch (err: any) {
       await interaction.editReply(`❌ Erro ao disparar partida de teste: ${err.message}`);
@@ -804,7 +806,7 @@ async function handleButtonQueue(interaction: ButtonInteraction) {
   }
 }
 
-async function createMatchRoom(guild: Guild, playerIds: string[], mode: GameMode) {
+async function createMatchRoom(guild: Guild, playerIds: string[], mode: GameMode, moveVoice: boolean = true) {
   try {
     const res = await fetch(`${API_BASE_URL}/api/matches/create`, {
       method: 'POST',
@@ -920,26 +922,28 @@ async function createMatchRoom(guild: Guild, playerIds: string[], mode: GameMode
 
     await textChannel.send({ embeds: [embed] });
 
-    // Move os jogadores para os respectivos canais de voz
-    for (const slot of match.blueTeam) {
-      try {
-        const member = await guild.members.fetch(slot.player.discordId);
-        if (member.voice.channel) {
-          await member.voice.setChannel(blueVoice);
+    // Move os jogadores para os respectivos canais de voz apenas se moveVoice for true
+    if (moveVoice) {
+      for (const slot of match.blueTeam) {
+        try {
+          const member = await guild.members.fetch(slot.player.discordId);
+          if (member.voice.channel) {
+            await member.voice.setChannel(blueVoice);
+          }
+        } catch (err) {
+          // Ignora se não estiver em canal de voz
         }
-      } catch (err) {
-        // Ignora se não estiver em canal de voz
       }
-    }
 
-    for (const slot of match.redTeam) {
-      try {
-        const member = await guild.members.fetch(slot.player.discordId);
-        if (member.voice.channel) {
-          await member.voice.setChannel(redVoice);
+      for (const slot of match.redTeam) {
+        try {
+          const member = await guild.members.fetch(slot.player.discordId);
+          if (member.voice.channel) {
+            await member.voice.setChannel(redVoice);
+          }
+        } catch (err) {
+          // Ignora se não estiver em canal de voz
         }
-      } catch (err) {
-        // Ignora se não estiver em canal de voz
       }
     }
   } catch (err) {

@@ -92,6 +92,8 @@ export interface DraftState {
   redSlots?: { discordTag: string; riotId: string; riotGameName?: string; lane: Lane }[];
   bluePicks: { championId: string; championName: string; lane?: Lane; playerPuuid?: string }[];
   redPicks: { championId: string; championName: string; lane?: Lane; playerPuuid?: string }[];
+  blueHover?: { championId: string; championName: string } | null;
+  redHover?: { championId: string; championName: string } | null;
   isCompleted: boolean;
 }
 

@@ -179,38 +179,48 @@ async function start() {
     const specToken = `spec-${Math.random().toString(36).substring(2, 10)}`;
 
     const lanes: Lane[] = ['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'];
-    const mockBlueNames = ['NKN DanCrox', 'NKN Fogo', 'NKN Shiro', 'NKN Raven', 'NKN Kael'];
-    const mockRedNames = ['NKN Zephyr', 'NKN Shadow', 'NKN Blaze', 'NKN Ghost', 'NKN Frost'];
+    const dbPlayers = (await db.getAllPlayersAsync()).filter((p) => p && p.discordId);
 
-    const blueSlots = lanes.map((lane, i) => ({
-      discordTag: mockBlueNames[i],
-      riotId: `${mockBlueNames[i]}#BR1`,
-      riotGameName: mockBlueNames[i],
-      lane,
-    }));
+    const getSlotPlayer = (teamPrefix: string, index: number): PlayerProfile => {
+      if (dbPlayers[index]) return dbPlayers[index];
+      const lane = lanes[index];
+      const slotName = `${teamPrefix} ${lane}`;
+      return {
+        id: `slot-${teamPrefix.toLowerCase()}-${lane.toLowerCase()}`,
+        discordId: `slot-${teamPrefix.toLowerCase()}-${lane.toLowerCase()}`,
+        discordTag: slotName,
+        riotGameName: slotName,
+        riotTagLine: 'NKN',
+        puuid: `puuid-${teamPrefix.toLowerCase()}-${lane.toLowerCase()}`,
+        riotRankTier: 'UNRANKED',
+        riotRankDivision: 'I',
+        riotLp: 0,
+        internalMmr: 1200,
+        matchesPlayed: 0,
+        wins: 0,
+        losses: 0,
+        registeredLanes: [lane],
+      };
+    };
 
-    const redSlots = lanes.map((lane, i) => ({
-      discordTag: mockRedNames[i],
-      riotId: `${mockRedNames[i]}#BR1`,
-      riotGameName: mockRedNames[i],
-      lane,
-    }));
+    const blueSlots = lanes.map((lane, i) => {
+      const p = getSlotPlayer('Azul', i);
+      return {
+        discordTag: p.discordTag || p.riotGameName,
+        riotId: `${p.riotGameName}#${p.riotTagLine || 'NKN'}`,
+        riotGameName: p.riotGameName,
+        lane,
+      };
+    });
 
-    const dummyPlayer = (name: string): PlayerProfile => ({
-      id: `mock-${name}`,
-      discordId: `mock-${name}`,
-      discordTag: name,
-      riotGameName: name,
-      riotTagLine: 'BR1',
-      puuid: `mock-puuid-${name}`,
-      riotRankTier: 'DIAMOND',
-      riotRankDivision: 'I',
-      riotLp: 75,
-      internalMmr: 1200,
-      matchesPlayed: 10,
-      wins: 6,
-      losses: 4,
-      registeredLanes: ['MID'],
+    const redSlots = lanes.map((lane, i) => {
+      const p = getSlotPlayer('Vermelho', i + 5);
+      return {
+        discordTag: p.discordTag || p.riotGameName,
+        riotId: `${p.riotGameName}#${p.riotTagLine || 'NKN'}`,
+        riotGameName: p.riotGameName,
+        lane,
+      };
     });
 
     const match: MatchData = {
@@ -219,13 +229,13 @@ async function start() {
       roomName: `NUKENIN-${matchId.toUpperCase()}`,
       roomPassword: Math.random().toString(36).substring(2, 6).toUpperCase(),
       blueTeam: lanes.map((lane, i) => ({
-        player: dummyPlayer(mockBlueNames[i]),
+        player: getSlotPlayer('Azul', i),
         assignedLane: lane,
         team: 'BLUE',
         isCaptain: i === 0,
       })),
       redTeam: lanes.map((lane, i) => ({
-        player: dummyPlayer(mockRedNames[i]),
+        player: getSlotPlayer('Vermelho', i + 5),
         assignedLane: lane,
         team: 'RED',
         isCaptain: i === 0,

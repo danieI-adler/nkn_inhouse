@@ -946,18 +946,23 @@ async function createMatchRoom(guild: Guild, playerIds: string[], mode: GameMode
     const redCaptainLink = `${draftBase}/#/draft/${matchId}?token=${match.redCaptainToken}`;
     const spectatorLink = `${draftBase}/#/draft/${matchId}?token=${match.spectatorToken}`;
 
+    const blueCaptain = blueTeamWithNicknames.find((s: any) => s.isCaptain) || blueTeamWithNicknames[0];
+    const redCaptain = redTeamWithNicknames.find((s: any) => s.isCaptain) || redTeamWithNicknames[0];
+
     const embed = new EmbedBuilder()
       .setTitle(`⚔️ Partida Formada - #${matchId.toUpperCase()}`)
       .setDescription(
         `**Sala no LoL**: \`${match.roomName}\` | **Senha**: \`${match.roomPassword}\`\n\n` +
+        `👑 **Capitão Azul:** <@${blueCaptain.player.discordId}> (**${blueCaptain.displayName}**)\n` +
+        `👑 **Capitão Vermelho:** <@${redCaptain.player.discordId}> (**${redCaptain.displayName}**)\n\n` +
         `**🔵 Time Azul:**\n` +
         blueTeamWithNicknames
-          .map((s: any) => `<@${s.player.discordId}> (**${s.displayName}**) • \`${s.assignedLane}\` • ${s.player.riotGameName}#${s.player.riotTagLine}`)
+          .map((s: any) => `${s.isCaptain ? '👑 ' : ''}<@${s.player.discordId}> (**${s.displayName}**) • \`${s.assignedLane}\` • ${s.player.riotGameName}#${s.player.riotTagLine}`)
           .join('\n') +
         `\n📊 [OP.GG Time Azul](${blueOpgg})\n\n` +
         `**🔴 Time Vermelho:**\n` +
         redTeamWithNicknames
-          .map((s: any) => `<@${s.player.discordId}> (**${s.displayName}**) • \`${s.assignedLane}\` • ${s.player.riotGameName}#${s.player.riotTagLine}`)
+          .map((s: any) => `${s.isCaptain ? '👑 ' : ''}<@${s.player.discordId}> (**${s.displayName}**) • \`${s.assignedLane}\` • ${s.player.riotGameName}#${s.player.riotTagLine}`)
           .join('\n') +
         `\n📊 [OP.GG Time Vermelho](${redOpgg})\n\n` +
         `**Links do Draft:**\n` +
@@ -967,7 +972,10 @@ async function createMatchRoom(guild: Guild, playerIds: string[], mode: GameMode
       )
       .setColor('#38bdf8');
 
-    await textChannel.send({ embeds: [embed] });
+    await textChannel.send({
+      content: `📢 **Atenção:** Os capitães da partida são <@${blueCaptain.player.discordId}> (Time Azul) e <@${redCaptain.player.discordId}> (Time Vermelho)! Acessem o link do draft para iniciar.`,
+      embeds: [embed],
+    });
 
     // Move os jogadores para os respectivos canais de voz apenas se moveVoice for true
     if (moveVoice) {

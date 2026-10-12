@@ -127,22 +127,26 @@ export default function App() {
   const [bluePicks, setBluePicks] = useState<ChampionData[]>([]);
   const [redPicks, setRedPicks] = useState<ChampionData[]>([]);
 
-  // Nomes dos 10 Jogadores (Estilo Competitivo Oficial / Inhouse)
+  // Nomes dos 10 Jogadores (Carregados da API ou padrão limpo)
   const [bluePlayers, setBluePlayers] = useState<string[]>([
-    'NKN DanCrox',
-    'NKN Fogo',
-    'NKN Shiro',
-    'NKN Raven',
-    'NKN Kael',
+    'Azul 1',
+    'Azul 2',
+    'Azul 3',
+    'Azul 4',
+    'Azul 5',
   ]);
 
   const [redPlayers, setRedPlayers] = useState<string[]>([
-    'NKN Zephyr',
-    'NKN Shadow',
-    'NKN Blaze',
-    'NKN Ghost',
-    'NKN Frost',
+    'Vermelho 1',
+    'Vermelho 2',
+    'Vermelho 3',
+    'Vermelho 4',
+    'Vermelho 5',
   ]);
+
+  // Campeões em hover (seleção provisória em tempo real)
+  const [blueHover, setBlueHover] = useState<{ championId: string; championName: string } | null>(null);
+  const [redHover, setRedHover] = useState<{ championId: string; championName: string } | null>(null);
 
   // Troca de Rotas (Swap Lanes) no final (30 segundos)
   const [swapSourceIndex, setSwapSourceIndex] = useState<{ team: TeamSide; index: number } | null>(null);
@@ -272,6 +276,13 @@ export default function App() {
         setRedPlayers(currentRedPlayers);
       }
 
+      if (state.blueHover !== undefined) {
+        setBlueHover(state.blueHover);
+      }
+      if (state.redHover !== undefined) {
+        setRedHover(state.redHover);
+      }
+
       // Detecta novos bans para animação estilo CBLOL
       if (Array.isArray(state.blueBans)) {
         if (state.blueBans.length > prevBlueBansCount.current) {
@@ -350,6 +361,14 @@ export default function App() {
     socket.on('draft_update', (data: any) => {
       syncState(data.state);
       setSelectedChampion(null);
+    });
+
+    socket.on('hover_updated', (data: { team: TeamSide; hover: { championId: string; championName: string } | null }) => {
+      if (data.team === 'BLUE') {
+        setBlueHover(data.hover);
+      } else {
+        setRedHover(data.hover);
+      }
     });
 
     socket.on('roles_updated', (data: any) => {
@@ -619,9 +638,9 @@ export default function App() {
     loadDataDragon();
   }, []);
 
-  // 2. Timer decrescente de 45s para picks e bans
+  // 2. Timer decrescente de 45s para picks e bans (apenas no modo simulador local e após READY_CHECK)
   useEffect(() => {
-    if (isCompleted || isPaused) return;
+    if (isCompleted || isPaused || isSocketMode || draftPhase === 'READY_CHECK') return;
 
     const interval = setInterval(() => {
       setTimer((prev) => {
@@ -634,7 +653,7 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [stepIndex, isCompleted, isPaused, champions]);
+  }, [stepIndex, isCompleted, isPaused, isSocketMode, draftPhase, champions]);
 
   // 3. Timer decrescente de 30s para a fase de troca de campeões (Swap Phase)
   useEffect(() => {
@@ -676,6 +695,22 @@ export default function App() {
 
   // Auto-seleção em caso de tempo esgotado
   const handleAutoSelect = () => {
+    // 4. Se alguém estiver dando hover/selecionado, utiliza esse campeão
+    if (selectedChampion && !unavailableIds.has(selectedChampion.id)) {
+      executeAction(selectedChampion);
+      return;
+    }
+    const currentHover = currentStep?.team === 'BLUE' ? blueHover : redHover;
+    if (currentHover && currentHover.championId && !unavailableIds.has(currentHover.championId)) {
+      const champ = champions.find(c => c.id === currentHover.championId) || {
+        id: currentHover.championId,
+        name: currentHover.championName || currentHover.championId,
+        roles: [],
+      };
+      executeAction(champ);
+      return;
+    }
+
     const available = champions.filter((c) => !unavailableIds.has(c.id));
     if (available.length === 0) return;
     const randomChamp = available[Math.floor(Math.random() * available.length)];
@@ -1250,6 +1285,47 @@ export default function App() {
                         )}
                       </div>
                     </>
+                  ) : isCurrentActingSlot && blueHover ? (
+                    (() => {
+                      const hChamp = champions.find(c => c.id === blueHover.championId) || { id: blueHover.championId, name: blueHover.championName, roles: [] };
+                      return (
+                        <>
+                          <img
+                            src={getSplashUrl(hChamp)}
+                            alt={hChamp.name}
+                            className="absolute inset-0 w-full h-full object-cover object-top opacity-35 filter contrast-125 saturate-50"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-r from-[#07050f]/95 via-[#07050f]/60 to-transparent"></div>
+                          <div className="relative z-10 px-4 flex items-center justify-between w-full">
+                            <div className="flex items-center gap-3">
+                              <div className="w-12 h-12 rounded-lg border-2 border-dashed border-sky-400/80 overflow-hidden shadow animate-pulse">
+                                <img
+                                  src={getAvatarUrl(hChamp)}
+                                  alt={hChamp.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              <div className="flex flex-col">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-sky-300 font-mono tracking-wider bg-sky-950/70 px-1.5 py-0.5 rounded border border-sky-500/30">
+                                    {bluePlayers[idx]}
+                                  </span>
+                                  <span className="text-[10px] text-gray-400 font-mono font-bold tracking-widest uppercase">
+                                    {lane}
+                                  </span>
+                                  <span className="text-[10px] font-bold text-sky-400 font-mono uppercase bg-sky-950/90 px-1.5 py-0.2 rounded border border-sky-400/40 animate-pulse">
+                                    PROVISÓRIO
+                                  </span>
+                                </div>
+                                <span className="font-bold text-lg text-sky-200/90 italic uppercase tracking-wider font-mono drop-shadow-md">
+                                  {hChamp.name}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()
                   ) : (
                     <div className="px-5 text-gray-400 text-sm font-mono flex items-center justify-between w-full">
                       <div className="flex items-center gap-2.5">
@@ -1407,7 +1483,24 @@ export default function App() {
                   <button
                     key={champ.id}
                     disabled={isTaken || !canUserAct}
-                    onClick={() => setSelectedChampion(champ)}
+                    onClick={() => {
+                      setSelectedChampion(champ);
+                      if (currentStep && !isCompleted) {
+                        if (currentStep.team === 'BLUE') {
+                          setBlueHover({ championId: champ.id, championName: champ.name });
+                        } else {
+                          setRedHover({ championId: champ.id, championName: champ.name });
+                        }
+                      }
+                      if (isSocketMode && socketRef.current && matchId && captainToken) {
+                        socketRef.current.emit('hover_champion', {
+                          matchId,
+                          token: captainToken,
+                          championId: champ.id,
+                          championName: champ.name,
+                        });
+                      }
+                    }}
                     className={`flex flex-col items-center p-1.5 rounded-xl border transition-all duration-150 group relative ${
                       isTaken
                         ? 'opacity-25 grayscale cursor-not-allowed border-transparent'
@@ -1571,6 +1664,47 @@ export default function App() {
                         )}
                       </div>
                     </>
+                  ) : isCurrentActingSlot && redHover ? (
+                    (() => {
+                      const hChamp = champions.find(c => c.id === redHover.championId) || { id: redHover.championId, name: redHover.championName, roles: [] };
+                      return (
+                        <>
+                          <img
+                            src={getSplashUrl(hChamp)}
+                            alt={hChamp.name}
+                            className="absolute inset-0 w-full h-full object-cover object-top opacity-35 filter contrast-125 saturate-50"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-l from-[#07050f]/95 via-[#07050f]/60 to-transparent"></div>
+                          <div className="relative z-10 px-4 flex items-center justify-between w-full flex-row-reverse text-right">
+                            <div className="flex items-center gap-3 flex-row-reverse">
+                              <div className="w-12 h-12 rounded-lg border-2 border-dashed border-rose-400/80 overflow-hidden shadow animate-pulse">
+                                <img
+                                  src={getAvatarUrl(hChamp)}
+                                  alt={hChamp.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              <div className="flex flex-col items-end">
+                                <div className="flex items-center gap-2 flex-row-reverse">
+                                  <span className="text-xs font-bold text-rose-300 font-mono tracking-wider bg-rose-950/70 px-1.5 py-0.5 rounded border border-rose-500/30">
+                                    {redPlayers[idx]}
+                                  </span>
+                                  <span className="text-[10px] text-gray-400 font-mono font-bold tracking-widest uppercase">
+                                    {lane}
+                                  </span>
+                                  <span className="text-[10px] font-bold text-rose-400 font-mono uppercase bg-rose-950/90 px-1.5 py-0.2 rounded border border-rose-400/40 animate-pulse">
+                                    PROVISÓRIO
+                                  </span>
+                                </div>
+                                <span className="font-bold text-lg text-rose-200/90 italic uppercase tracking-wider font-mono drop-shadow-md">
+                                  {hChamp.name}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()
                   ) : (
                     <div className="px-5 text-gray-400 text-sm font-mono flex items-center justify-between w-full flex-row-reverse">
                       <div className="flex items-center gap-2.5 flex-row-reverse">

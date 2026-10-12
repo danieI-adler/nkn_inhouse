@@ -53,6 +53,8 @@ export class DraftEngine {
       redSlots: redSlots || [],
       bluePicks: [],
       redPicks: [],
+      blueHover: null,
+      redHover: null,
       isCompleted: false,
     };
 
@@ -128,6 +130,19 @@ export class DraftEngine {
       }
     });
 
+    socket.on('hover_champion', ({ matchId, token, championId, championName }) => {
+      const room = this.rooms.get(matchId);
+      if (!room || room.state.isCompleted) return;
+
+      if (token === room.blueCaptainToken) {
+        room.state.blueHover = championId ? { championId, championName: championName || championId } : null;
+        this.io.to(`draft:${matchId}`).emit('hover_updated', { team: 'BLUE', hover: room.state.blueHover });
+      } else if (token === room.redCaptainToken) {
+        room.state.redHover = championId ? { championId, championName: championName || championId } : null;
+        this.io.to(`draft:${matchId}`).emit('hover_updated', { team: 'RED', hover: room.state.redHover });
+      }
+    });
+
     socket.on('submit_action', ({ matchId, token, championId, championName }) => {
       this.processAction(matchId, token, championId, championName);
     });
@@ -157,12 +172,16 @@ export class DraftEngine {
       }
 
       room.state.timerSecondsRemaining--;
+
+      // Dispara o tick com o valor exibido no cronômetro da tela
+      // Quando timerSecondsRemaining está entre -1 e -3, na interface aparece 0
+      const displayTime = Math.max(0, room.state.timerSecondsRemaining);
       this.io.to(`draft:${matchId}`).emit('timer_tick', {
-        secondsRemaining: room.state.timerSecondsRemaining,
+        secondsRemaining: displayTime,
       });
 
-      if (room.state.timerSecondsRemaining <= 0) {
-        // Tempo esgotado: auto lock aleatório / vazio
+      // O tempo oficial acaba em 0, e o jogador ganha 3 segundos escondidos (-3s) antes do auto-lock
+      if (room.state.timerSecondsRemaining <= -3) {
         this.autoLockAction(matchId);
       }
     }, 1000);
@@ -196,6 +215,10 @@ export class DraftEngine {
 
     if (!isAuthorized) return;
 
+    // Limpa o hover ao confirmar
+    if (currentSide === 'BLUE') room.state.blueHover = null;
+    else room.state.redHover = null;
+
     // Registra pick ou ban
     if (room.state.currentActionType === 'BAN') {
       if (currentSide === 'BLUE') room.state.blueBans.push(championId);
@@ -214,6 +237,32 @@ export class DraftEngine {
     const room = this.rooms.get(matchId);
     if (!room) return;
 
+    const currentSide = room.state.currentTurn;
+    const currentHover = currentSide === 'BLUE' ? room.state.blueHover : room.state.redHover;
+
+    // 4. Se alguém estiver dando hovering em um champion, ele deverá ser selecionado no fim do tempo
+    if (currentHover && currentHover.championId && currentHover.championId !== 'None') {
+      const champId = currentHover.championId;
+      const champName = currentHover.championName || champId;
+
+      if (room.state.currentActionType === 'BAN') {
+        if (currentSide === 'BLUE') room.state.blueBans.push(champId);
+        else room.state.redBans.push(champId);
+        room.onActionLogged?.(`⏰ Tempo esgotado! **${currentSide}** baniu **${champName}** (selecionado no hover).`);
+      } else {
+        if (currentSide === 'BLUE') room.state.bluePicks.push({ championId: champId, championName: champName });
+        else room.state.redPicks.push({ championId: champId, championName: champName });
+        room.onActionLogged?.(`⏰ Tempo esgotado! **${currentSide}** escolheu **${champName}** (selecionado no hover).`);
+      }
+
+      if (currentSide === 'BLUE') room.state.blueHover = null;
+      else room.state.redHover = null;
+
+      this.advanceTurn(matchId);
+      return;
+    }
+
+    // Se nenhum campeão estiver em hover:
     const fallbackId = 'None';
     const fallbackName = 'Nenhum';
 
@@ -227,6 +276,9 @@ export class DraftEngine {
       else room.state.redPicks.push({ championId: randomChamp, championName: randomChamp });
       room.onActionLogged?.(`⏰ Tempo esgotado! **${room.state.currentTurn}** recebeu **${randomChamp}** automaticamente.`);
     }
+
+    if (currentSide === 'BLUE') room.state.blueHover = null;
+    else room.state.redHover = null;
 
     this.advanceTurn(matchId);
   }

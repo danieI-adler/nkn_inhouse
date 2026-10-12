@@ -134,8 +134,15 @@ async function start() {
   // 3.1. Rota de Leaderboard / Ranking Geral
   server.get('/api/leaderboard', async (_request, reply) => {
     const all = await db.getAllPlayersAsync();
-    // Ordena por MMR decrescente
-    all.sort((a, b) => b.internalMmr - a.internalMmr);
+    // Ordena primariamente por Vitórias decrescentes, depois Winrate e MMR
+    all.sort((a, b) => {
+      const winsDiff = (b.wins || 0) - (a.wins || 0);
+      if (winsDiff !== 0) return winsDiff;
+      const wrA = (a.matchesPlayed || 0) > 0 ? (a.wins || 0) / a.matchesPlayed : 0;
+      const wrB = (b.matchesPlayed || 0) > 0 ? (b.wins || 0) / b.matchesPlayed : 0;
+      if (wrB !== wrA) return wrB - wrA;
+      return (b.internalMmr || 1200) - (a.internalMmr || 1200);
+    });
     return reply.send({ success: true, leaderboard: all.slice(0, 50) });
   });
 

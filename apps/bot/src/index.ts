@@ -1141,19 +1141,26 @@ async function buildRankingEmbedAndButtons() {
   const res = await fetch(`${API_BASE_URL}/api/leaderboard`);
   const data = await res.json();
 
-  const medals = ['🥇', '🥈', '🥉'];
-  let description = '📊 Nenhum jogador registrado no ranking até o momento.';
+  let description = 'Nenhum jogador registrado no ranking até o momento.';
 
   if (res.ok && data.leaderboard && data.leaderboard.length > 0) {
-    const rows = data.leaderboard.map((p: any, idx: number) => {
-      const medal = idx < 3 ? medals[idx] : `\`#${idx + 1}\``;
-      const totalGames = p.matchesPlayed || 0;
-      const winrate = totalGames > 0 ? Math.round((p.wins / totalGames) * 100) : 0;
+    const list = data.leaderboard.slice(0, 25);
+    const rows = list.map((p: any, idx: number) => {
+      let badge: string;
+      if (idx === 0) badge = '🥇';
+      else if (idx === 1) badge = '🥈';
+      else if (idx === 2) badge = '🥉';
+      else badge = `\`#${String(idx + 1).padStart(2, '0')}\``;
+
+      const totalGames = p.matchesPlayed || (p.wins + p.losses) || 0;
+      const winrate = totalGames > 0 ? Math.round(((p.wins || 0) / totalGames) * 100) : 0;
       const nameTag = p.riotGameName
         ? `${p.riotGameName}#${p.riotTagLine || 'BR1'}`
-        : p.discordTag || `Jogador <@${p.discordId}>`;
-      return `${medal} **${nameTag}** (<@${p.discordId}>)\n` +
-             `⚡ MMR: **${p.internalMmr}** | V: **${p.wins || 0}** D: **${p.losses || 0}** (${winrate}% WR) | Rotas: \`${(p.registeredLanes || ['FILL']).join(', ')}\``;
+        : p.discordTag || `Jogador`;
+
+      const userMention = p.discordId ? ` (<@${p.discordId}>)` : '';
+      return `${badge} **${nameTag}**${userMention}\n` +
+             `┗━ **${p.wins || 0}V** ${p.losses || 0}D (${winrate}% WR) • MMR: \`${p.internalMmr || 1200}\``;
     });
     description = rows.join('\n\n');
   }
@@ -1161,8 +1168,8 @@ async function buildRankingEmbedAndButtons() {
   const embed = new EmbedBuilder()
     .setTitle('🏆 LEADERBOARD - COMUNIDADE NUKENIN')
     .setDescription(description)
-    .setColor('#eab308')
-    .setFooter({ text: 'Ranking oficial Nukenin • Atualiza automaticamente a cada partida' })
+    .setColor('#f59e0b')
+    .setFooter({ text: 'Classificação oficial por número de vitórias • Atualizado em tempo real' })
     .setTimestamp();
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -1170,7 +1177,6 @@ async function buildRankingEmbedAndButtons() {
       .setCustomId('ranking_refresh')
       .setLabel('Atualizar Ranking')
       .setStyle(ButtonStyle.Primary)
-      .setEmoji('🔄')
   );
 
   return { embeds: [embed], components: [row] };

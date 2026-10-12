@@ -7,6 +7,8 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
   EmbedBuilder,
   ChatInputCommandInteraction,
   ButtonInteraction,
@@ -218,6 +220,14 @@ client.once('ready', async () => {
                   .setFooter({ text: 'Inhouse Nukenin • Use /resultado ao finalizar o jogo' });
 
                 await (channel as any).send({ embeds: [embed], files: [attachment] });
+
+                // Busca dados atualizados da partida e posta o painel interativo de seleção de campeão e rota
+                const matchRes = await fetch(`${API_BASE_URL}/api/matches/${matchId}`);
+                if (matchRes.ok) {
+                  const matchData = await matchRes.json();
+                  const match = matchData.match;
+                  await sendLobbySelectionPanel(channel, match);
+                }
               }
             } catch (cardErr) {
               console.error('Erro ao enviar card final do draft:', cardErr);
@@ -240,6 +250,12 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton()) {
     console.log(`[Discord Bot] Botão clicado: ${interaction.customId}`);
     handleButtonQueue(interaction);
+    return;
+  }
+
+  if (interaction.isStringSelectMenu()) {
+    console.log(`[Discord Bot] Menu de seleção: ${interaction.customId}`);
+    await handleSelectMenuInteraction(interaction);
     return;
   }
 
@@ -513,6 +529,32 @@ client.on('interactionCreate', async (interaction) => {
           .join('\n');
       }
 
+      // Estatísticas por Rota na Inhouse
+      let laneStatsText = '*(Ainda sem dados registrados)*';
+      if (p.laneStats && Object.keys(p.laneStats).length > 0) {
+        laneStatsText = Object.entries(p.laneStats)
+          .map(([lane, s]: [string, any]) => {
+            const tot = s.wins + s.losses;
+            const wr = tot > 0 ? Math.round((s.wins / tot) * 100) : 0;
+            return `\`${lane}\`: **${s.wins}V** ${s.losses}D (${wr}% WR)`;
+          })
+          .join('\n');
+      }
+
+      // Estatísticas por Campeão na Inhouse
+      let champStatsText = '*(Ainda sem dados registrados)*';
+      if (p.championStats && Object.keys(p.championStats).length > 0) {
+        champStatsText = Object.values(p.championStats)
+          .sort((a: any, b: any) => (b.wins + b.losses) - (a.wins + a.losses))
+          .slice(0, 5)
+          .map((s: any) => {
+            const tot = s.wins + s.losses;
+            const wr = tot > 0 ? Math.round((s.wins / tot) * 100) : 0;
+            return `**${s.name}**: **${s.wins}V** ${s.losses}D (${wr}% WR)`;
+          })
+          .join('\n');
+      }
+
       const embed = new EmbedBuilder()
         .setTitle(`🥷 Perfil Inhouse • ${p.riotGameName}#${p.riotTagLine}`)
         .setDescription(`Informações de invocador e desempenho competitivo de <@${targetUser.id}>`)
@@ -535,17 +577,22 @@ client.on('interactionCreate', async (interaction) => {
             inline: true,
           },
           {
-            name: '📊 Estatísticas Inhouse',
+            name: '📊 Geral Inhouse',
             value: `**${totalGames}** jogos • **${p.wins}**V / **${p.losses}**D (${winrate}% WR)`,
             inline: true,
           },
           {
-            name: '🔗 Links Externos',
-            value: `[Ver Perfil no OP.GG](${opggUrl})`,
+            name: '🗺️ WR por Rota (Inhouse)',
+            value: laneStatsText,
             inline: true,
           },
           {
-            name: '⭐ Campeões Mais Jogados (Maestria)',
+            name: '⚔️ WR por Campeão (Inhouse)',
+            value: champStatsText,
+            inline: true,
+          },
+          {
+            name: '⭐ Maestria Riot (SoloQ)',
             value: champsText,
             inline: false,
           }
@@ -1216,6 +1263,180 @@ async function updatePermanentRankingMessage(guild: Guild) {
     console.log('✅ Painel permanente do ranking auto-atualizado com sucesso pós-partida!');
   } catch (err) {
     console.error('Erro ao atualizar mensagem permanente do ranking:', err);
+  }
+}
+
+// Constrói Embed e Menus de Seleção de Campeão e Rota para o Lobby da Partida
+function buildLobbySelectionPayload(match: any) {
+  const matchId = match.id;
+
+  // Extrai lista única de campeões pickados no draft pelos dois times
+  const pickedChamps: { name: string; id: string }[] = [];
+  const addPick = (slot: any) => {
+    if (slot && slot.championName && !pickedChamps.some((c) => c.name.toLowerCase() === slot.championName.toLowerCase())) {
+      pickedChamps.push({ name: slot.championName, id: slot.championId || slot.championName });
+    }
+  };
+
+  (match.blueTeam || []).forEach(addPick);
+  (match.redTeam || []).forEach(addPick);
+
+  const formatTeamSlots = (slots: any[], teamName: string) => {
+    return slots
+      .map((s) => {
+        const champ = s.championName ? `**${s.championName}**` : '*(Pendente)*';
+        const lane = s.assignedLane ? `\`${s.assignedLane}\`` : '`FILL`';
+        return `> <@${s.player.discordId}>: ${champ} • Rota: ${lane}`;
+      })
+      .join('\n');
+  };
+
+  const blueText = (match.blueTeam && match.blueTeam.length > 0)
+    ? formatTeamSlots(match.blueTeam, 'Time Azul')
+    : '> *(Sem jogadores)*';
+  const redText = (match.redTeam && match.redTeam.length > 0)
+    ? formatTeamSlots(match.redTeam, 'Time Vermelho')
+    : '> *(Sem jogadores)*';
+
+  const embed = new EmbedBuilder()
+    .setTitle(`🎯 CONFIRMAÇÃO DE CAMPEÃO & ROTA — #${matchId.toUpperCase()}`)
+    .setDescription(
+      `Jogadores, confirmem abaixo o **campeão** e a **rota** que vocês vão jogar!\n` +
+      `*Esses dados serão utilizados para registrar seu Winrate por Rota e Campeão no \`/perfil\`.*\n\n` +
+      `**🔵 Time Azul:**\n${blueText}\n\n` +
+      `**🔴 Time Vermelho:**\n${redText}`
+    )
+    .setColor('#3b82f6')
+    .setFooter({ text: 'Inhouse Nukenin • Selecione seu campeão e sua rota nos menus abaixo' })
+    .setTimestamp();
+
+  const components: any[] = [];
+
+  // Menu 1: Escolha do Campeão (dentre os campeões pickados no draft)
+  if (pickedChamps.length > 0) {
+    const champSelect = new StringSelectMenuBuilder()
+      .setCustomId(`match_select_champ_${matchId}`)
+      .setPlaceholder('👉 Selecione o seu Campeão...')
+      .addOptions(
+        pickedChamps.map((c) =>
+          new StringSelectMenuOptionBuilder()
+            .setLabel(c.name)
+            .setValue(c.name)
+            .setDescription(`Confirmar escolha de ${c.name}`)
+        )
+      );
+    components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(champSelect));
+  }
+
+  // Menu 2: Escolha da Rota
+  const laneSelect = new StringSelectMenuBuilder()
+    .setCustomId(`match_select_lane_${matchId}`)
+    .setPlaceholder('👉 Selecione a sua Rota...')
+    .addOptions([
+      new StringSelectMenuOptionBuilder().setLabel('TOP').setValue('TOP').setDescription('Rota do Topo'),
+      new StringSelectMenuOptionBuilder().setLabel('JUNGLE').setValue('JUNGLE').setDescription('Selva'),
+      new StringSelectMenuOptionBuilder().setLabel('MID').setValue('MID').setDescription('Rota do Meio'),
+      new StringSelectMenuOptionBuilder().setLabel('ADC').setValue('ADC').setDescription('Atirador / Bot'),
+      new StringSelectMenuOptionBuilder().setLabel('SUPPORT').setValue('SUPPORT').setDescription('Suporte'),
+    ]);
+  components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(laneSelect));
+
+  return { embeds: [embed], components };
+}
+
+// Envia o painel interativo no canal do lobby da partida
+async function sendLobbySelectionPanel(channel: any, match: any) {
+  try {
+    const payload = buildLobbySelectionPayload(match);
+    await channel.send(payload);
+  } catch (err) {
+    console.error('[Discord Bot] Erro ao enviar painel de seleção de campeão/rota no lobby:', err);
+  }
+}
+
+// Trata as seleções feitas pelos jogadores nos menus interativos do lobby
+async function handleSelectMenuInteraction(interaction: any) {
+  const customId = interaction.customId;
+  const userId = interaction.user.id;
+
+  if (customId.startsWith('match_select_champ_')) {
+    const matchId = customId.replace('match_select_champ_', '');
+    const selectedChampionName = interaction.values[0];
+
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/matches/${matchId}/player-selection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          discordId: userId,
+          championName: selectedChampionName,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        await interaction.editReply({ content: `❌ ${data.message || 'Erro ao registrar campeão.'}` });
+        return;
+      }
+
+      await interaction.editReply({
+        content: `✅ Campeão **${selectedChampionName}** confirmado para você na partida **#${matchId.toUpperCase()}**!`,
+      });
+
+      // Atualiza a mensagem pública do lobby com o status atualizado
+      const updatedMatch = data.match;
+      const updatedPayload = buildLobbySelectionPayload(updatedMatch);
+      await interaction.message.edit({
+        embeds: updatedPayload.embeds,
+        components: updatedPayload.components,
+      });
+    } catch (e: any) {
+      console.error('Erro ao processar seleção de campeão:', e);
+      await interaction.editReply({ content: `❌ Falha ao salvar campeão: ${e.message}` });
+    }
+    return;
+  }
+
+  if (customId.startsWith('match_select_lane_')) {
+    const matchId = customId.replace('match_select_lane_', '');
+    const selectedLane = interaction.values[0] as Lane;
+
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/matches/${matchId}/player-selection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          discordId: userId,
+          lane: selectedLane,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        await interaction.editReply({ content: `❌ ${data.message || 'Erro ao registrar rota.'}` });
+        return;
+      }
+
+      await interaction.editReply({
+        content: `✅ Rota \`${selectedLane}\` confirmada para você na partida **#${matchId.toUpperCase()}**!`,
+      });
+
+      // Atualiza a mensagem pública do lobby com o status atualizado
+      const updatedMatch = data.match;
+      const updatedPayload = buildLobbySelectionPayload(updatedMatch);
+      await interaction.message.edit({
+        embeds: updatedPayload.embeds,
+        components: updatedPayload.components,
+      });
+    } catch (e: any) {
+      console.error('Erro ao processar seleção de rota:', e);
+      await interaction.editReply({ content: `❌ Falha ao salvar rota: ${e.message}` });
+    }
+    return;
   }
 }
 

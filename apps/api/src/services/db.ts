@@ -122,6 +122,8 @@ export class DatabaseService {
             ? row.registered_lanes
             : (Array.isArray(d.registeredLanes) && d.registeredLanes.length > 0 ? d.registeredLanes : ['FILL']),
           topChampions: d.topChampions || [],
+          laneStats: d.laneStats || {},
+          championStats: d.championStats || {},
         };
         if (p.discordId) {
           this.players.set(p.discordId, p);
@@ -236,6 +238,8 @@ export class DatabaseService {
               ? row.registered_lanes
               : (Array.isArray(d.registeredLanes) && d.registeredLanes.length > 0 ? d.registeredLanes : ['FILL']),
             topChampions: d.topChampions || [],
+            laneStats: d.laneStats || {},
+            championStats: d.championStats || {},
           };
           this.players.set(discordId, p);
           return p;

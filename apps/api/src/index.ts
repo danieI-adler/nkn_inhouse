@@ -362,6 +362,47 @@ async function start() {
     });
   });
 
+  // 4.1. Rota para Obter Dados da Partida
+  server.get<{ Params: { matchId: string } }>('/api/matches/:matchId', async (request, reply) => {
+    const cleanId = (request.params.matchId || '').trim().replace(/^#/, '').toLowerCase();
+    const match = db.getMatch(request.params.matchId) || db.getMatch(cleanId) || db.getMatch(`nkn-${cleanId}`);
+    if (!match) return reply.status(404).send({ message: 'Partida não encontrada.' });
+    return reply.send({ success: true, match });
+  });
+
+  // 4.2. Rota para Atualizar Campeão e Rota Escolhidos pelo Jogador no Discord
+  server.post<{
+    Params: { matchId: string };
+    Body: { discordId: string; championName?: string; championId?: string; lane?: Lane };
+  }>('/api/matches/:matchId/player-selection', async (request, reply) => {
+    const cleanId = (request.params.matchId || '').trim().replace(/^#/, '').toLowerCase();
+    const match = db.getMatch(request.params.matchId) || db.getMatch(cleanId) || db.getMatch(`nkn-${cleanId}`);
+    if (!match) return reply.status(404).send({ message: 'Partida não encontrada.' });
+
+    const { discordId, championName, championId, lane } = request.body;
+    let updatedSlot: any = null;
+
+    const findAndApply = (slots: any[]) => {
+      const s = slots.find((slot) => slot.player.discordId === discordId);
+      if (s) {
+        if (championName) s.championName = championName;
+        if (championId) s.championId = championId;
+        if (lane) s.assignedLane = lane;
+        updatedSlot = s;
+      }
+    };
+
+    findAndApply(match.blueTeam);
+    findAndApply(match.redTeam);
+
+    if (!updatedSlot) {
+      return reply.status(400).send({ message: 'Jogador não pertence a esta partida.' });
+    }
+
+    db.setMatch(match.id, match);
+    return reply.send({ success: true, match, slot: updatedSlot });
+  });
+
   // 5. Rota para Gerar Imagem do Card de Partida
   server.get<{ Params: { matchId: string } }>('/api/matches/:matchId/card', async (request, reply) => {
     const match = db.getMatch(request.params.matchId);
@@ -465,20 +506,39 @@ async function start() {
       for (let idx = 0; idx < teamAPlayers.length; idx++) {
         const upd = openSkillResults.teamAUpdates[idx];
         const pid = teamAPlayers[idx].discordId;
+        const slot = match.blueTeam[idx];
         const p = db.getPlayer(pid);
         if (p) {
           p.mu = upd.newMu;
           p.sigma = upd.newSigma;
           p.internalMmr = upd.newMmr;
           p.matchesPlayed++;
-          if (winner === 'BLUE') p.wins++; else p.losses++;
+          const won = winner === 'BLUE';
+          if (won) p.wins++; else p.losses++;
+
+          // Atualiza estatísticas por rota
+          if (slot && slot.assignedLane) {
+            p.laneStats = p.laneStats || {};
+            const laneKey = slot.assignedLane;
+            if (!p.laneStats[laneKey]) p.laneStats[laneKey] = { wins: 0, losses: 0 };
+            if (won) p.laneStats[laneKey].wins++; else p.laneStats[laneKey].losses++;
+          }
+
+          // Atualiza estatísticas por campeão
+          if (slot && slot.championName) {
+            p.championStats = p.championStats || {};
+            const champKey = slot.championName;
+            if (!p.championStats[champKey]) p.championStats[champKey] = { name: champKey, wins: 0, losses: 0 };
+            if (won) p.championStats[champKey].wins++; else p.championStats[champKey].losses++;
+          }
+
           await db.setPlayerAsync(p.discordId, p);
           resultsSummary.push({
             discordId: p.discordId,
             riotGameName: p.riotGameName,
             newMmr: upd.newMmr,
             delta: upd.delta,
-            won: winner === 'BLUE',
+            won,
           });
         }
       }
@@ -487,20 +547,39 @@ async function start() {
       for (let idx = 0; idx < teamBPlayers.length; idx++) {
         const upd = openSkillResults.teamBUpdates[idx];
         const pid = teamBPlayers[idx].discordId;
+        const slot = match.redTeam[idx];
         const p = db.getPlayer(pid);
         if (p) {
           p.mu = upd.newMu;
           p.sigma = upd.newSigma;
           p.internalMmr = upd.newMmr;
           p.matchesPlayed++;
-          if (winner === 'RED') p.wins++; else p.losses++;
+          const won = winner === 'RED';
+          if (won) p.wins++; else p.losses++;
+
+          // Atualiza estatísticas por rota
+          if (slot && slot.assignedLane) {
+            p.laneStats = p.laneStats || {};
+            const laneKey = slot.assignedLane;
+            if (!p.laneStats[laneKey]) p.laneStats[laneKey] = { wins: 0, losses: 0 };
+            if (won) p.laneStats[laneKey].wins++; else p.laneStats[laneKey].losses++;
+          }
+
+          // Atualiza estatísticas por campeão
+          if (slot && slot.championName) {
+            p.championStats = p.championStats || {};
+            const champKey = slot.championName;
+            if (!p.championStats[champKey]) p.championStats[champKey] = { name: champKey, wins: 0, losses: 0 };
+            if (won) p.championStats[champKey].wins++; else p.championStats[champKey].losses++;
+          }
+
           await db.setPlayerAsync(p.discordId, p);
           resultsSummary.push({
             discordId: p.discordId,
             riotGameName: p.riotGameName,
             newMmr: upd.newMmr,
             delta: upd.delta,
-            won: winner === 'RED',
+            won,
           });
         }
       }

@@ -18,6 +18,8 @@ export interface PlayerProfile {
   losses: number;
   registeredLanes: Lane[];
   topChampions?: { id: string; name: string; level: number; points: number }[];
+  laneStats?: Record<string, { wins: number; losses: number }>;
+  championStats?: Record<string, { name: string; wins: number; losses: number }>;
 }
 
 export type GameMode = 'RANKED_AUTO' | 'RANKED_CAPTAIN' | 'CASUAL_ARAM_ZOACAO';

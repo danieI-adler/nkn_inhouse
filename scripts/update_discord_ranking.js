@@ -10,7 +10,7 @@ async function updateRanking() {
   let description = 'Nenhum jogador registrado no ranking até o momento.';
 
   if (rows && rows.length > 0) {
-    const list = rows.slice(0, 25);
+    const list = rows.slice(0, 20);
     const formattedRows = list.map((p, idx) => {
       let badge;
       if (idx === 0) badge = '🥇';
@@ -26,16 +26,20 @@ async function updateRanking() {
 
       const userMention = p.discord_id ? ' (<@' + p.discord_id + '>)' : '';
       return badge + ' **' + nameTag + '**' + userMention + '\n' +
-             '┗━ **' + (p.wins || 0) + 'V** ' + (p.losses || 0) + 'D (' + winrate + '% WR) • MMR: `' + (p.internal_mmr || 1200) + '`';
+             '> **' + (p.wins || 0) + 'V** ' + (p.losses || 0) + 'D • `' + winrate + '%` WR • MMR `' + (p.internal_mmr || 1200) + '`';
     });
     description = formattedRows.join('\n\n');
   }
 
   const embed = new EmbedBuilder()
     .setTitle('🏆 LEADERBOARD - COMUNIDADE NUKENIN')
-    .setDescription(description)
+    .setDescription(
+      '*Classificação oficial ordenada pelo número de vitórias.*\n' +
+      '*Atualizada automaticamente após cada partida.*\n\n' +
+      description
+    )
     .setColor('#f59e0b')
-    .setFooter({ text: 'Classificação oficial por número de vitórias • Atualizado em tempo real' })
+    .setFooter({ text: 'Inhouse Nukenin • Atualização em tempo real pós-jogo' })
     .setTimestamp();
 
   const row = new ActionRowBuilder().addComponents(

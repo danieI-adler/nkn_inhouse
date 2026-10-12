@@ -1144,7 +1144,7 @@ async function buildRankingEmbedAndButtons() {
   let description = 'Nenhum jogador registrado no ranking até o momento.';
 
   if (res.ok && data.leaderboard && data.leaderboard.length > 0) {
-    const list = data.leaderboard.slice(0, 25);
+    const list = data.leaderboard.slice(0, 20);
     const rows = list.map((p: any, idx: number) => {
       let badge: string;
       if (idx === 0) badge = '🥇';
@@ -1160,16 +1160,20 @@ async function buildRankingEmbedAndButtons() {
 
       const userMention = p.discordId ? ` (<@${p.discordId}>)` : '';
       return `${badge} **${nameTag}**${userMention}\n` +
-             `┗━ **${p.wins || 0}V** ${p.losses || 0}D (${winrate}% WR) • MMR: \`${p.internalMmr || 1200}\``;
+             `> **${p.wins || 0}V** ${p.losses || 0}D • \`${winrate}%\` WR • MMR \`${p.internalMmr || 1200}\``;
     });
     description = rows.join('\n\n');
   }
 
   const embed = new EmbedBuilder()
     .setTitle('🏆 LEADERBOARD - COMUNIDADE NUKENIN')
-    .setDescription(description)
+    .setDescription(
+      '*Classificação oficial ordenada pelo número de vitórias.*\n' +
+      '*Atualizada automaticamente após cada partida.*\n\n' +
+      description
+    )
     .setColor('#f59e0b')
-    .setFooter({ text: 'Classificação oficial por número de vitórias • Atualizado em tempo real' })
+    .setFooter({ text: 'Inhouse Nukenin • Atualização em tempo real pós-jogo' })
     .setTimestamp();
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
